@@ -1,6 +1,6 @@
 # Jev Context
 
-A local Codex plugin that runs ripgrep, classifies candidate code passages with Jev, and returns only `Yes` passages. It records paired filtered/unfiltered payloads so retrieval savings can be reproduced exactly under a named tokenizer.
+A local Codex plugin for when your LLM needs to search across a codebase to build context. It runs ripgrep, asks Jev which candidate passages are relevant to your task, and returns only `Yes` passages to Codex. This can reduce the unrelated code loaded into the answering model's context. It records paired filtered/unfiltered payloads so retrieval savings can be reproduced exactly under a named tokenizer.
 
 Install once for use across local projects. Codex supplies the current workspace on each search, so switching repositories needs no plugin reconfiguration. Global preferences control whether Jev is used automatically or only on request, and whether answers include token-savings receipts. Defaults are **ask only** and **receipts on**.
 
@@ -16,49 +16,147 @@ Reported savings count retrieval response text under a named tokenizer. They are
 
 Licensed under the [MIT License](LICENSE), provided without warranty. Third-party dependencies and the TypeSafe service have their own licenses and terms.
 
-## Run locally
+## Install and try it
 
-Requires Node.js 22+, ripgrep on PATH (or `JEV_CONTEXT_RG`), and a TypeSafe API key for filtered/shadow mode. Install dependencies inside this directory using `pnpm install --frozen-lockfile` (or `npm install`). The pinned dependency set is in `pnpm-lock.yaml`. On Windows sandboxes, `pnpm install --package-import-method=copy` avoids inaccessible hard links.
+These instructions use **Windows PowerShell** and local Codex tasks. The plugin requires Node.js 22+, ripgrep, and a TypeSafe API key for filtered searches. macOS/Linux users need equivalent shell commands; the walkthrough below has not been validated on those systems.
 
-Commands below run **from this plugin directory**. Copy `.env.example` to `.env` and set your own TypeSafe key. Set `repoPath` to the repository you want to search, and adapt `examples/search.json` to its files and your question. No key value is written to plugin configuration or logs.
+### 1. Check prerequisites
+
+- Install [Node.js](https://nodejs.org/en/download), version 22 or newer; it includes npm.
+- Install [ripgrep](https://github.com/BurntSushi/ripgrep#installation). Its executable is named `rg`.
+- Have Codex installed with support for local plugins and the built-in Plugin Creator skill. See [Codex plugin setup](https://learn.chatgpt.com/docs/build-plugins).
+- Obtain your own API key through [TypeSafe](https://docs.typesafe.ai/). This is separate from your OpenAI account; Jev API calls can incur charges.
+
+Open a new PowerShell window after installing tools and check:
 
 ```powershell
-node --test test/*.test.mjs
+node --version
+npm.cmd --version
+rg --version
+```
+
+Each command should print a version. Resolve missing commands before continuing. `npm.cmd` avoids PowerShell execution-policy errors affecting `npm.ps1`.
+
+### 2. Download the plugin and install dependencies
+
+On [this repository's GitHub page](https://github.com/zbush/jev-context), choose **Code → Download ZIP**, extract it to a permanent folder, and open PowerShell in that folder. Alternatively, with Git installed:
+
+```powershell
+git clone https://github.com/zbush/jev-context.git
+Set-Location jev-context
+```
+
+All remaining terminal commands run **from the plugin directory**, where `package.json` and this README are located:
+
+```powershell
+npm.cmd install
+```
+
+If you already use pnpm, prefer `pnpm install --frozen-lockfile` for the pinned dependency set in `pnpm-lock.yaml`. In Windows sandboxes, add `--package-import-method=copy` if hard links are inaccessible. npm is the simpler setup route but does not use the pnpm lockfile.
+
+### 3. Add your key and generate the launcher
+
+On first setup only, create the local environment file:
+
+```powershell
 Copy-Item .env.example .env
-# Edit .env locally before making live requests.
-$repoPath = 'C:\path\to\your\repository'
+notepad .env
+```
+
+In Notepad, fill in the empty `TYPESAFE_API_KEY=` value with your key, save, and close. Leave the other defaults unchanged for now. Do not paste your key into a Codex conversation. `.env` is ignored by Git; do not overwrite an existing `.env` when updating the plugin.
+
+Generate the launcher, capturing the installed ripgrep path so Codex does not need to inherit your terminal's PATH:
+
+```powershell
+$rgPath = (Get-Command rg -CommandType Application).Source
+node scripts/configure.mjs --env-file .env --rg "$rgPath"
+```
+
+This creates ignored `.mcp.json` with absolute paths to Node, the source checkout, and your environment file. No key value is copied into the launcher. Keep the checkout and its dependencies in place after installation; moving them requires regenerating the launcher and refreshing the installed plugin.
+
+### 4. Check the connection without API charges
+
+```powershell
+$repoPath = (Get-Location).Path
+node scripts/check-connection.mjs --root "$repoPath"
+```
+
+Expect JSON containing `"status": "ok"`, `"tool": "search_code"`, and `"jev_calls": 0`. This checks the launcher, MCP handshake, tool discovery, and a baseline search with no matches. It writes a local run record but does not test your API key, live classification, or installation inside Codex. Pass `--config` to check another launcher, such as an installed copy.
+
+### 5. Register and install in Codex
+
+Open this plugin folder as a local Codex project. In a task, invoke the built-in **Plugin Creator** skill with this prompt:
+
+```text
+$plugin-creator Register the existing jev-context plugin in this workspace
+in my personal marketplace and install it. Preserve its implementation,
+manifest, generated .mcp.json, and bundled skill. The launcher has already
+passed scripts/check-connection.mjs. If registration needs a source mirror,
+keep the generated launcher and skill consistent with this source checkout.
+Tell me the marketplace name and confirm installation succeeded.
+```
+
+This uses the [documented Plugin Creator workflow](https://learn.chatgpt.com/docs/build-plugins) to register an existing local package. Allow any requested local marketplace write needed for registration. If registration succeeds but installation is left to you, refresh Codex, open **Plugins → Personal**, select **Jev Context**, and install it. With the Codex CLI available, the equivalent is `codex plugin add jev-context@personal` when the reported marketplace name is `personal`; substitute the reported name otherwise.
+
+Start a **new Codex task** in this repository and ask:
+
+> Use Jev code search to find where TypeSafe request timeouts are enforced. Search src for AbortSignal with at most 3 candidates, then explain the behavior and cite the source lines.
+
+This first live search can make up to three Jev calls. You should see a `search_code` tool call and an explanation pointing to `src/jev.mjs`; with default settings, the answer should include a retrieval-token receipt. Whether passages pass filtering is a model judgment, so exact wording and savings vary.
+
+Now open another local project and explicitly ask Codex to use Jev there. Codex supplies that task's repository path; switching projects needs no reconfiguration. Installing the plugin does not add tools to already running tasks or install it on other computers/cloud environments. Registering only the MCP server does not install the companion workflow skill.
+
+### Troubleshooting
+
+- **`rg` is missing or the connection check fails to launch:** verify `rg --version`, rerun configuration with the absolute `--rg` path, and retry the check.
+- **Missing modules:** run dependency installation in the plugin directory. Keep that directory after installing into Codex.
+- **The free check passes but live search fails:** check the key in `.env` and TypeSafe account access. The free check intentionally does not authenticate to TypeSafe. Restart the MCP server after editing `.env`.
+- **Jev is unavailable or ignored:** confirm the plugin is installed, start a new task, and explicitly say “Use Jev code search.” Ask-only is the default; it does not intercept native search tools.
+- **Changed settings seem inactive:** follow [Preferences](#preferences), including refreshing the installed skill and restarting the server. Restart Codex if a new task still uses the old server.
+- **No passages returned:** distinguish no search matches from no candidates passing the relevance filter. Try other symbols, a clearer question, or more surrounding context; an empty filtered result does not prove the code is absent.
+
+## Best usage: building context across a codebase
+
+Jev is most useful when the answering LLM needs to discover which parts of an unfamiliar repository matter before explaining or changing code. Examples include tracing a feature through several modules, investigating a bug with many possible call sites, finding configuration consumers, and locating tests relevant to a planned change. When a search finds many unrelated matches, filtering can leave more room for useful evidence in the model's context.
+
+Give Codex the actual task and ask it to use Jev **before loading broad search output**. For example:
+
+> Use Jev code search to build context for how authentication works in this repository. Find the entry points, token validation, configuration, and relevant tests. Explain the flow with file and line references before suggesting changes.
+
+> Use Jev code search to investigate why request timeouts are not reaching callers. Follow the request path, cancellation handling, and tests. Include evidence that contradicts the suspected cause.
+
+For better results:
+
+- **Provide a concrete question.** “Find where retry limits are read and enforced” gives the classifier a clearer goal than “find interesting code.”
+- **Search in stages.** Start with likely symbols or terms, then follow dependencies and tests. Ripgrep retrieves literal/regex matches; Jev judges those candidates. It is not a semantic index that discovers code with no matching query terms.
+- **Narrow after discovery.** Use relevant directories and file globs, and keep candidate caps modest. One admitted passage means one API call; repeated searches incur new usage because there is no classification cache.
+- **Check coverage and context.** Candidate-cap notices mean some passages were not considered. Refine the search, or deliberately increase the cap/context when needed. Withheld passages cannot currently be expanded by ID.
+- **Judge answer quality as well as savings.** Ask for source references, follow relevant dependencies, and run appropriate tests before accepting changes. Filtering can omit important evidence.
+
+For a known file or exact line, reading it directly is usually simpler. Searches where nearly every result is relevant may save little or add payload overhead, while still adding Jev latency and API usage. Use ask-only while evaluating the tradeoff; opt into [auto mode](#preferences) if you want Codex instructed to use Jev for routine code searches. Reported retrieval savings do not establish whole-task speed or cost savings.
+
+## Advanced: CLI searches and benchmarks
+
+These are optional developer tools, not installation steps. From the plugin directory, the included search example can run against this repository:
+
+```powershell
+$repoPath = (Get-Location).Path
 node --env-file=.env src/cli.mjs search --root "$repoPath" --input examples/search.json
+```
+
+This search allows up to 12 Jev calls. For another repository, change `$repoPath` and adapt the question, query, and paths in `examples/search.json`.
+
+The supplied **benchmark and label definitions refer to the separate Brotato repository**, which is not included. Adapt their questions, queries, paths, and line anchors to your target before running:
+
+```powershell
+$repoPath = 'C:\path\to\your\repository'
 node --env-file=.env src/cli.mjs benchmark --root "$repoPath" --input examples/benchmark.json --data .jev-context/live-smoke
 node src/cli.mjs report --data .jev-context/live-smoke --out reports/live-smoke --labels examples/labels.json --verify
 ```
 
-The supplied benchmark definitions refer to the original, separate Brotato repository. Adapt the questions, queries, paths, and labels to your target before using them. They make **at most 36 Jev API calls**: three cases capped at 12 candidates each. The benchmark prints metrics, not raw source passages. Each rerun incurs new API usage; there is no classification cache or automatic retry in this MVP. Use a fresh `--data` directory for each independent benchmark suite, or expect subsequent reports to include every run in the directory. Three examples are a smoke test, not a representative efficacy study.
+The supplied three cases are capped at 12 candidates each: at most 36 Jev calls before you modify them. Each rerun incurs new API usage; there is no classification cache or automatic retry. Use a fresh `--data` directory per independent suite, or reports will include every run in that directory. Three examples are a smoke test, not a representative efficacy study.
 
-`search` prints the actual response text to stdout and a small metrics receipt to stderr. The MCP server reserves stdout for MCP transport. `report` writes `summary.json` and `runs.csv`; it never needs an API key. `--verify` re-tokenizes saved payloads, checks their hashes and candidate snapshot hashes, checks selection against stored judgments, and exits nonzero on an audit mismatch. This is a reproducibility check, not a signed attestation.
-
-## Connect to Codex
-
-The plugin contains `.codex-plugin/plugin.json` and a workflow skill. Generate the ignored, machine-specific `.mcp.json` launcher before installing:
-
-```powershell
-node scripts/configure.mjs --env-file .env
-```
-
-The launcher is global by default: Codex passes the current workspace as `repository_root` on every search. Switching projects needs no reconfiguration. An optional `--root` supplies a legacy fallback, not a restriction; an explicit per-call root takes precedence. With neither, the tool returns an error instead of guessing from its working directory. Multiple projects can use the same server concurrently.
-
-Use `--rg` with an absolute ripgrep executable path when the app does not inherit your shell PATH. Use `--data` to select a telemetry directory. The generated `.mcp.json` uses absolute paths to the source checkout and Node executable. This deliberately supports local development: moving the checkout requires reconfiguration and plugin reinstall. To distribute the source, recipients install dependencies and regenerate their own launcher; don't share the machine-specific `.mcp.json` unchanged.
-
-Register/install the package through the Codex personal marketplace, or add its generated command/args/environment as a local STDIO MCP server in Codex settings. Start a new Codex task after installation and ask: **“Use Jev code search to find where TypeSafe timeouts are enforced.”** Installing a plugin doesn't add tools to an already running task. This plugin does not intercept native grep, file reads, or web search; the skill routes the requested workflow through its tool.
-
-The workflow skill is part of the plugin installation. Registering only the MCP server exposes the tool and its description, but does not install the companion skill. Global availability applies to local tasks that load this plugin; it does not install the plugin on other computers or cloud environments.
-
-Check the generated launcher against any local project before making paid requests:
-
-```powershell
-node scripts/check-connection.mjs --root "$repoPath"
-```
-
-This performs an MCP handshake, tool discovery, and a baseline search designed to return no matches. It writes a local run record, makes zero Jev calls, and does not test the TypeSafe credential or live classification. Pass `--config` to check a different launcher, such as an installed copy. The `--root` here selects only the check's repository; it does not bind the plugin to it.
+`search` prints response text to stdout and a metrics receipt to stderr. The MCP server reserves stdout for transport. `benchmark` prints metrics, not raw source passages. `report` writes `summary.json` and `runs.csv` without an API key. `--verify` re-tokenizes saved payloads, checks payload/candidate hashes and selection against stored judgments, and exits nonzero on an audit mismatch. This is a reproducibility check, not a signed attestation.
 
 ## Preferences
 
@@ -79,6 +177,31 @@ node scripts/settings.mjs --receipts on --run-mode ask-only
 Settings are saved in ignored `jev-context.settings.json`. The command also regenerates `skills/jev-code-search/SKILL.md` from `SKILL.template.md` so skill discovery matches the mode. Edit the template when changing shared instructions. Omitting an option preserves its current value; invalid settings fail rather than silently changing behavior.
 
 After changing settings, refresh the installed plugin from its marketplace source and start a new Codex task. If your marketplace uses a separate source mirror, sync the generated skill and local settings there before reinstalling. The MCP launcher continues to read settings beside its source checkout. `JEV_CONTEXT_SETTINGS_FILE` can override that runtime path; keep it consistent with the generated skill. These are local command-line preferences, not toggles in Codex's plugin UI.
+
+## Configuration reference
+
+Edit `.env` in the original plugin checkout for API and search configuration:
+
+- `TYPESAFE_API_KEY`: your TypeSafe key; required when filtered/shadow searches have candidates to classify. Baseline searches need no key.
+- `TYPESAFE_MODEL`: defaults to `jev-latest`. Use a specific available model version for repeatable comparisons.
+- `JEV_CONTEXT_ENCODING`: defaults to `o200k_base`; also supports `cl100k_base`. This changes measurement, not the Codex model.
+- `JEV_CONTEXT_CONCURRENCY`: concurrent classification calls per search, integer 1–8; default 4. This is not a session-wide spending limit.
+- `JEV_CONTEXT_MIN_YES_PROBABILITY`: number from 0–1; default 0. A Yes below this threshold becomes Unknown and is withheld. Higher values can discard useful evidence; no universal threshold has been established.
+- `JEV_CONTEXT_RG`: ripgrep executable path; defaults to `rg` on PATH. Prefer launcher `--rg` as in the quickstart.
+- `JEV_CONTEXT_DATA_DIR`: telemetry directory; defaults to `.jev-context` under your user home directory. Use an absolute path for predictable placement.
+- `JEV_CONTEXT_SETTINGS_FILE`: optional absolute path to an alternative preferences JSON file. Default: `jev-context.settings.json` beside the plugin source. Advanced use only: `scripts/settings.mjs` still writes beside the checkout, so a custom file and the generated skill must be kept consistent.
+- `JEV_CONTEXT_ROOT`: optional legacy repository fallback. Leave it unset for normal use; Codex supplies `repository_root` on each call. The generated launcher sets this value through `--root` instead.
+
+The server reads configuration **at startup**, not on each search. After editing `.env` or preferences, restart the plugin's MCP server (restart Codex if needed), then start a new task. Changes to ordinary `.env` values do not require regenerating `.mcp.json` when the file stays at the same path. Preference changes also require refreshing the installed skill as described above.
+
+`node scripts/configure.mjs` accepts `--env-file`, `--rg`, `--data`, and `--root`. It overwrites `.mcp.json`, so repeat every launcher option you want to retain. For example:
+
+```powershell
+$rgPath = (Get-Command rg -CommandType Application).Source
+node scripts/configure.mjs --env-file .env --rg "$rgPath" --data "$env:USERPROFILE\.jev-context"
+```
+
+Explicit launcher environment values (such as `--rg` and `--data`) take precedence over the corresponding `.env` values. After changing launcher paths, refresh/reinstall the plugin from its local marketplace and restart the server. A per-call `repository_root` always takes precedence over legacy `--root`; the fallback is not a filesystem restriction. Multiple projects can share the server without binding it to one checkout. Each recipient must generate their own launcher; do not distribute a machine-specific `.mcp.json`.
 
 ## Tool contract
 
@@ -162,7 +285,7 @@ Before publishing, stage only intended source/documentation changes and inspect 
 node --env-file=.env scripts/check-publish.mjs
 ```
 
-Use the path to your existing environment file if it lives elsewhere; never copy its contents into Git. The guard checks all indexed files, including files force-added despite ignore rules, and reports filenames without printing matched secrets. Keep the GitHub repository private. Do not bypass the guard or include raw `runs.csv`, response snapshots, generated reports, credentials, or machine-specific launchers in a commit. Local preference changes also regenerate the tracked skill; review that diff so personal settings are not unintentionally published as shared defaults.
+Use the path to your existing environment file if it lives elsewhere; never copy its contents into Git. The guard checks all indexed files, including files force-added despite ignore rules, and reports filenames without printing matched secrets. Publish the reviewed source and documentation while keeping credentials, telemetry, and machine-specific configuration private. Before making an existing repository public, review its Git history too: the index guard does not check earlier commits. Do not bypass the guard or include raw `runs.csv`, response snapshots, generated reports, credentials, or machine-specific launchers in a commit. Local preference changes also regenerate the tracked skill; review that diff so personal settings are not unintentionally published as shared defaults.
 
 ## Sources
 
