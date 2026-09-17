@@ -6,6 +6,16 @@ Install once for use across local projects. Codex supplies the current workspace
 
 This repository contains the plugin only. The initial smoke tests used a separate Brotato project; its source, credentials, and benchmark outputs are not included.
 
+## Experimental MVP
+
+Jev Context is an experimental retrieval tool, not a security scanner or a guarantee of complete answers. Relevance judgments can be wrong: `No` and `Unknown` passages are withheld, and recovery of those passages is not implemented. Evaluate answer quality alongside token savings before relying on filtering for important work.
+
+Filtered and shadow searches send candidate code and your question to the TypeSafe API and can incur charges. Use them only with code you are authorized to send to that service. Ignore rules and filename exclusions do not detect secrets embedded in ordinary source. Local telemetry retains original passages, including withheld code; keep it private. See [Data handling](#data-handling).
+
+Reported savings count retrieval response text under a named tokenizer. They are not verified Codex context usage, total task savings, or billing reductions. Skill-driven automatic searches and answer receipts depend on Codex following the instructions; the plugin does not intercept native tools. See [What the token metrics mean](#what-the-token-metrics-mean).
+
+Licensed under the [MIT License](LICENSE), provided without warranty. Third-party dependencies and the TypeSafe service have their own licenses and terms.
+
 ## Run locally
 
 Requires Node.js 22+, ripgrep on PATH (or `JEV_CONTEXT_RG`), and a TypeSafe API key for filtered/shadow mode. Install dependencies inside this directory using `pnpm install --frozen-lockfile` (or `npm install`). The pinned dependency set is in `pnpm-lock.yaml`. On Windows sandboxes, `pnpm install --package-import-method=copy` avoids inaccessible hard links.
@@ -91,7 +101,7 @@ Optional fields:
 
 `filtered` returns only Yes. `baseline` returns all admitted candidates and makes **no Jev calls**. `shadow` classifies but returns the baseline; its paired reduction is hypothetical and its actual payload saving is zero. The baseline shares candidate chunking, query, exclusions, caps, and formatting with filtered mode; it is **not** arbitrary native grep output.
 
-Passages retain source paths, line numbers, source text, and stable content IDs. Nearby matches merge; chunks are bounded to 120 lines/12,000 characters. Search respects ignore files, does not follow symlinks, excludes files over 1 MiB, and has a 15-second/16-MiB stdout bound. Candidate-cap and oversized-line omissions are explicit. A ripgrep error or overflow returns an error rather than a silently partial success. These search limits are not Jev savings.
+Passages retain source paths, line numbers, source text, and stable content IDs. Nearby matches merge; chunks are bounded to 120 lines/12,000 characters. Search respects ignore files, does not follow symlinks, excludes files over 1 MiB, and bounds each ripgrep phase to 15 seconds/16 MiB. An independent file listing from the repository root enforces ignore rules even when include globs or an explicit subdirectory would override them. The configured telemetry directory is also excluded before classification. This extra listing adds latency, and repositories exceeding its limits fail closed. Candidate-cap and oversized-line omissions are explicit. A ripgrep error or overflow returns an error rather than a silently partial success. These search limits are not Jev savings.
 
 Jev is asked one independent Choice question per passage, with Yes/No/Unknown rubrics. Optional `JEV_CONTEXT_MIN_YES_PROBABILITY` (0–1, default 0) demotes a low-probability Yes to Unknown while preserving the original judgment. Do not treat the default as an evaluated universal threshold. `TYPESAFE_MODEL` defaults to `jev-latest`; pin a version for longitudinal experiments. `JEV_CONTEXT_CONCURRENCY` is 1–8, default 4. Each API call times out after 15 seconds.
 

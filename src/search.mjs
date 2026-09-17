@@ -69,7 +69,7 @@ export function parseCandidates(stdout, maxChars = 12000, maxLines = 120) {
   return { candidates: passages, omitted_long_lines: omittedLongLines };
 }
 
-export async function retrieve(root, args, { rg = process.env.JEV_CONTEXT_RG || 'rg' } = {}) {
+export async function retrieve(root, args, { rg = process.env.JEV_CONTEXT_RG || 'rg', dataDir } = {}) {
   const realRoot = await realpath(root);
   const target = await realpath(path.resolve(realRoot, args.path));
   if (!isWithin(realRoot, target) || !(await stat(target)).isDirectory()) {
@@ -87,7 +87,30 @@ export async function retrieve(root, args, { rg = process.env.JEV_CONTEXT_RG || 
   for (const glob of excluded) argv.push('--glob', `!${glob}`);
   argv.push('--', args.query, relative);
   let stdout;
+  let admittedFiles;
   const started = performance.now();
+  // Positive --glob options and explicitly named ignored directories can override
+  // rg ignore rules. Build an independent root-wide file set without user globs,
+  // then admit only those paths before any candidate reaches Jev or telemetry.
+  try {
+    const listingArgs = ['--no-config', '--files', '--null'];
+    for (const glob of excluded) listingArgs.push('--glob', `!${glob}`);
+    listingArgs.push('--', '.');
+    let listing;
+    try {
+      ({ stdout: listing } = await exec(rg, listingArgs, { cwd: realRoot, encoding: 'utf8', windowsHide: true,
+        timeout: 15000, maxBuffer: 16 * 1024 * 1024 }));
+    } catch (error) {
+      if (error.code === 1) listing = error.stdout || '';
+      else throw error;
+    }
+    const telemetryRoot = dataDir ? await realpath(dataDir) : null;
+    admittedFiles = new Set(listing.split('\0').filter(Boolean)
+      .map(file => file.replaceAll('\\', '/').replace(/^\.\//, ''))
+      .filter(file => !telemetryRoot || !isWithin(telemetryRoot, path.resolve(realRoot, file))));
+  } catch {
+    throw new Error('Could not verify ignored-file exclusions within the 15s/16MiB limit; narrow the repository or check configuration.');
+  }
   try {
     ({ stdout } = await exec(rg, argv, { cwd: realRoot, encoding: 'utf8', windowsHide: true,
       timeout: 15000, maxBuffer: 16 * 1024 * 1024 }));
@@ -96,12 +119,14 @@ export async function retrieve(root, args, { rg = process.env.JEV_CONTEXT_RG || 
     else throw new Error('ripgrep failed or exceeded its 15s/16MiB limit; narrow the query or check rg installation.');
   }
   const parsed = parseCandidates(stdout);
-  const candidates = parsed.candidates.slice(0, args.max_candidates);
+  const admitted = parsed.candidates.filter(candidate => admittedFiles.has(candidate.file));
+  const candidates = admitted.slice(0, args.max_candidates);
   return { candidates, snapshot_sha256: sha256(JSON.stringify(candidates)),
     retrieval_ms: Math.round(performance.now() - started),
     rg_stdout_bytes: Buffer.byteLength(stdout),
-    candidates_found: parsed.candidates.length, candidates_admitted: candidates.length,
-    omitted_candidate_cap: Math.max(0, parsed.candidates.length - candidates.length),
+    candidates_found: admitted.length, candidates_admitted: candidates.length,
+    omitted_candidate_cap: Math.max(0, admitted.length - candidates.length),
+    omitted_ignored_passages: parsed.candidates.length - admitted.length,
     omitted_long_lines: parsed.omitted_long_lines,
     limits: { context_lines: args.context_lines, max_candidates: args.max_candidates,
       max_file_bytes: 1048576, max_passage_chars: 12000, max_passage_lines: 120,

@@ -119,6 +119,31 @@ test('literal patterns cannot become shell options or commands', async () => {
   assert.equal(result.candidates[0].file, 'options.txt');
 });
 
+test('positive globs and direct subdirectory paths cannot expose ignored source', async () => {
+  const config = await fixture();
+  await mkdir(path.join(config.root, 'private'));
+  await writeFile(path.join(config.root, '.ignore'), 'private/\n');
+  await writeFile(path.join(config.root, 'private', 'secret.js'), 'const session = "PRIVATE_SOURCE";');
+  for (const extra of [{ globs: ['**/*.js'] }, { path: 'private', globs: ['*'] }]) {
+    const result = await retrieve(config.root, searchSchema.parse({ ...input, ...extra }));
+    assert.ok(result.candidates.every(c => !c.text.includes('PRIVATE_SOURCE')));
+  }
+});
+
+test('custom telemetry directory is excluded before classification', async () => {
+  const config = await fixture();
+  config.dataDir = path.join(config.root, 'custom-private-logs');
+  await mkdir(config.dataDir);
+  await writeFile(path.join(config.dataDir, 'snapshot.js'), 'const session = "PRIVATE_TELEMETRY";');
+  const result = await search({ ...input, globs: ['**/*.js'] }, config, { counter,
+    fetchImpl: async (url, options) => {
+      assert.ok(!options.body.includes('PRIVATE_TELEMETRY'));
+      return judge(url, options);
+    } });
+  assert.equal(result.isError, false);
+  assert.ok(!JSON.stringify(result.record).includes('PRIVATE_TELEMETRY'));
+});
+
 test('low-probability Yes becomes Unknown without losing the original judgment', async () => {
   const r = await classify(input, [{ id: 'a', text: 'code' }], { key: 'x', minYesProbability: 0.8,
     fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ model: 'test', usage: {},
