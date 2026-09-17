@@ -219,7 +219,7 @@ Optional fields:
 - `regex`: false by default, so a query is treated literally; shell execution is never used.
 - `case_sensitive`: false by default.
 - `context_lines`: 0–30, default 8.
-- `max_candidates`: 1–100, default 40.
+- `max_candidates`: 1–1,000, default 100; set per search to change the passage limit.
 - `mode`: `filtered` (default), `baseline`, or `shadow`.
 
 `filtered` returns only Yes. `baseline` returns all admitted candidates and makes **no Jev calls**. `shadow` classifies but returns the baseline; its paired reduction is hypothetical and its actual payload saving is zero. The baseline shares candidate chunking, query, exclusions, caps, and formatting with filtered mode; it is **not** arbitrary native grep output.
@@ -227,6 +227,8 @@ Optional fields:
 Passages retain source paths, line numbers, source text, and stable content IDs. Nearby matches merge; chunks are bounded to 120 lines/12,000 characters. Search respects ignore files, does not follow symlinks, excludes files over 1 MiB, and bounds each ripgrep phase to 15 seconds/16 MiB. An independent file listing from the repository root enforces ignore rules even when include globs or an explicit subdirectory would override them. The configured telemetry directory is also excluded before classification. This extra listing adds latency, and repositories exceeding its limits fail closed. Candidate-cap and oversized-line omissions are explicit. A ripgrep error or overflow returns an error rather than a silently partial success. These search limits are not Jev savings.
 
 Jev is asked one independent Choice question per passage, with Yes/No/Unknown rubrics. Optional `JEV_CONTEXT_MIN_YES_PROBABILITY` (0–1, default 0) demotes a low-probability Yes to Unknown while preserving the original judgment. Do not treat the default as an evaluated universal threshold. `TYPESAFE_MODEL` defaults to `jev-latest`; pin a version for longitudinal experiments. `JEV_CONTEXT_CONCURRENCY` is 1–8, default 4. Each API call times out after 15 seconds.
+
+The passage limit is a ceiling, not a target: only admitted matches are classified. A limit of 1,000 can make up to 1,000 paid Jev calls in filtered/shadow mode. Concurrency stays at four by default. Slow large searches can exceed the generated launcher's 600-second tool timeout, and many retained passages can produce a response too large for the host's context. The existing ripgrep size/time bounds still apply. Prefer narrower queries or smaller limits when practical; increasing the passage cap does not guarantee complete repository coverage.
 
 Any failed classification makes the entire search an error with **no source text returned**. Successful API usage within that failed run is retained; unavailable usage is flagged, never assumed free. Error responses are counted, and failed runs are excluded from successful paired-savings totals. An all-No/Unknown result explicitly says that no passages passed filtering; it does not assert an absence of evidence. Recovery of withheld items remains post-MVP.
 

@@ -88,6 +88,38 @@ test('candidate cap is explicit and does not masquerade as filtering', async () 
   assert.equal(result.record.metrics.paired_tokens_saved, 0);
 });
 
+test('passage limits default to 100, allow 1000, and retain accurate omissions', async () => {
+  const config = await fixture();
+  await writeFile(path.join(config.root, 'many.txt'), 'unique_passage\nspacer\n'.repeat(1001));
+  const args = searchSchema.parse({ question: 'Find passages', query: 'unique_passage', context_lines: 0 });
+  assert.equal(args.max_candidates, 100);
+  for (const max_candidates of [100, 1000]) {
+    const result = await retrieve(config.root, { ...args, max_candidates });
+    assert.equal(result.candidates.length, max_candidates);
+    assert.equal(result.candidates_found, 1001);
+    assert.equal(result.omitted_candidate_cap, 1001 - max_candidates);
+  }
+  assert.equal(searchSchema.parse({ ...args, max_candidates: 1000 }).max_candidates, 1000);
+  for (const max_candidates of [0, 1001, 1.5]) {
+    assert.throws(() => searchSchema.parse({ ...args, max_candidates }));
+  }
+});
+
+test('1000 classifications preserve order and the default four-request concurrency', async () => {
+  let active = 0, peak = 0, calls = 0;
+  const candidates = Array.from({ length: 1000 }, (_, i) => ({ id: String(i), text: 'source' }));
+  const decisions = await classify(input, candidates, { key: 'test-key', fetchImpl: async () => {
+    calls++; active++; peak = Math.max(peak, active);
+    await new Promise(resolve => setImmediate(resolve));
+    active--;
+    return response('Yes');
+  } });
+  assert.equal(calls, 1000);
+  assert.equal(peak, 4);
+  assert.deepEqual(decisions.map(d => d.candidate_id), candidates.map(c => c.id));
+  assert.ok(decisions.every(d => d.label === 'Yes' && !d.error));
+});
+
 test('no matches makes no API requests and yields an audited result', async () => {
   const result = await search({ ...input, query: 'ABSENT' }, await fixture(), { counter,
     fetchImpl: () => { throw new Error('must not call'); } });

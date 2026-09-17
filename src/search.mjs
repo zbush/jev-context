@@ -18,7 +18,8 @@ export const searchSchema = z.object({
   regex: z.boolean().default(false),
   case_sensitive: z.boolean().default(false),
   context_lines: z.number().int().min(0).max(30).default(8),
-  max_candidates: z.number().int().min(1).max(100).default(40),
+  max_candidates: z.number().int().min(1).max(1000).default(100)
+    .describe('Maximum passages evaluated: default 100, up to 1000. Higher limits increase API cost, latency, and possible response size; narrow the query when practical.'),
   mode: z.enum(['filtered', 'baseline', 'shadow']).default('filtered'),
 }).strict();
 
