@@ -1,4 +1,4 @@
-import { mkdir, writeFile, rename, readFile, readdir } from 'node:fs/promises';
+import { mkdir, writeFile, rename, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { retrieve, searchSchema, sha256 } from './search.mjs';
@@ -22,6 +22,8 @@ export function renderPayload(id, mode, retrieval, candidates) {
 export async function search(input, config, { counter, fetchImpl, retrieveImpl = retrieve,
   classifyImpl = classify, signal } = {}) {
   const args = searchSchema.parse(input);
+  // Per-call copies prevent concurrent tasks from changing each other's root.
+  config = { ...config, root: args.repository_root || config.root };
   const includeReceipts = config.includeReceipts ?? true;
   const id = randomUUID();
   const started = performance.now();
@@ -38,6 +40,10 @@ export async function search(input, config, { counter, fetchImpl, retrieveImpl =
     decisions: [], metrics: null };
   let payload;
   try {
+    if (!config.root) throw new Error('Supply repository_root with the absolute path of the current task workspace.');
+    config.root = await realpath(config.root);
+    if (!(await stat(config.root)).isDirectory()) throw new Error('repository_root must be a directory.');
+    record.root = config.root;
     const retrieved = await retrieveImpl(config.root, args, config);
     record.retrieval = retrieved;
     record.timing.retrieval_ms = retrieved.retrieval_ms;

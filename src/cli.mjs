@@ -17,7 +17,7 @@ const { values: opts, positionals } = parseArgs({ allowPositionals: true, option
 const command = positionals[0];
 
 function csv(rows) {
-  const keys = ['id', 'timestamp', 'status', 'mode', 'source', 'experiment', 'baseline_response_tokens',
+  const keys = ['id', 'timestamp', 'root', 'status', 'mode', 'source', 'experiment', 'baseline_response_tokens',
     'filtered_response_tokens', 'actual_response_tokens', 'paired_tokens_saved', 'paired_reduction_pct',
     'actual_vs_baseline_tokens_saved', 'jev_known_input_tokens', 'jev_known_output_tokens',
     'jev_missing_usage_calls', 'retrieval_ms', 'jev_wall_ms', 'total_ms'];

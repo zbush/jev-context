@@ -1,6 +1,6 @@
 {
   "name": "jev-context",
-  "version": "0.1.0+codex.20260917154933",
+  "version": "0.1.0+codex.20260917160004",
   "description": "Code search filtered by Jev before context loading, with auditable paired token metrics.",
   "author": {
     "name": "Local developer"

@@ -31,7 +31,8 @@ export function summarize(records) {
   const sum = (rows, fn) => rows.reduce((n, r) => n + fn(r), 0);
   const groups = new Map();
   for (const r of successful) {
-    const key = JSON.stringify({ encoding: r.tokenizer.encoding, tokenizer_version: r.tokenizer.version,
+    const key = JSON.stringify({ repository_root: r.root || null,
+      encoding: r.tokenizer.encoding, tokenizer_version: r.tokenizer.version,
       payload_format: r.payload_format || 'legacy-v1',
       run_mode: r.config.run_mode || 'ask-only',
       mode: r.mode, source: r.source, requested_model: r.config.model, prompt: r.prompt_version,

@@ -4,7 +4,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { createCounter } from '../src/metrics.mjs';
 
-const { values } = parseArgs({ options: { config: { type: 'string', default: '.mcp.json' } } });
+const { values } = parseArgs({ options: { config: { type: 'string', default: '.mcp.json' }, root: { type: 'string' } } });
 const config = JSON.parse(await readFile(values.config, 'utf8')).mcpServers.jev_context;
 const client = new Client({ name: 'jev-context-connection-check', version: '0.1.0' });
 const transport = new StdioClientTransport({ command: config.command, args: config.args, cwd: config.cwd,
@@ -19,6 +19,7 @@ try {
   // Unique no-match pattern verifies retrieval and logging without sending code to Jev or returning source.
   const result = await client.callTool({ name: 'search_code', arguments: {
     question: 'Verify the local plugin connection without calling Jev.',
+    ...(values.root ? { repository_root: values.root } : {}),
     query: '__JEV_CONNECTION_CHECK_7ba8d1d9__', globs: ['*.nonexistent-extension-7ba8d1d9'],
     mode: 'baseline', max_candidates: 1,
   } });

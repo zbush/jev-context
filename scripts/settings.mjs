@@ -9,7 +9,7 @@ export async function configureSettings(pluginRoot, changes) {
   const settings = settingsSchema.parse({ ...readSettings(settingsPath), ...changes });
   const template = await readFile(new URL('../skills/jev-code-search/SKILL.template.md', import.meta.url), 'utf8');
   const description = settings.run_mode === 'auto'
-    ? 'Always use Jev for code searches within the configured repository. Use this skill whenever searching a codebase, even when the user does not mention Jev. Applies relevance filtering before loading code into context.'
+    ? 'Always use Jev for code searches within the current task workspace. Use this skill whenever searching a codebase, even when the user does not mention Jev. Applies relevance filtering before loading code into context.'
     : 'Use Jev code search only when the user explicitly requests Jev, Jev relevance filtering, or its benchmark. Do not use for ordinary code searches.';
   const skill = template.replace('{{description}}', description)
     .replace('{{usage}}', usageInstruction(settings))

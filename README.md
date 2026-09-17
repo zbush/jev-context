@@ -29,8 +29,10 @@ The supplied benchmark definitions refer to the original, separate Brotato repos
 The plugin contains `.codex-plugin/plugin.json` and a workflow skill. Generate the ignored, machine-specific `.mcp.json` launcher before installing:
 
 ```powershell
-node scripts/configure.mjs --root "$repoPath" --env-file .env
+node scripts/configure.mjs --env-file .env
 ```
+
+The launcher is global by default: Codex passes the current workspace as `repository_root` on every search. Switching projects needs no reconfiguration. An optional `--root` supplies a legacy fallback, not a restriction; an explicit per-call root takes precedence. With neither, the tool returns an error instead of guessing from its working directory. Multiple projects can use the same server concurrently.
 
 Use `--rg` with an absolute ripgrep executable path when the app does not inherit your shell PATH. Use `--data` to select a telemetry directory. The generated `.mcp.json` uses absolute paths to the source checkout and Node executable. This deliberately supports local development: moving the checkout requires reconfiguration and plugin reinstall. To distribute the source, recipients install dependencies and regenerate their own launcher; don't share the machine-specific `.mcp.json` unchanged.
 
@@ -49,7 +51,7 @@ node scripts/settings.mjs --receipts on --run-mode ask-only
 ```
 
 - **Receipts on/off:** controls the answer footer and whether tool responses include `token_savings`. Turning receipts off keeps local telemetry and reproducible token counts, with no receipt payload overhead.
-- **Auto run:** the skill tells Codex to use Jev whenever searching code inside the configured repository, unless the user opts out. This is model guidance, not interception or enforcement of native tools.
+- **Auto run:** the skill tells Codex to use Jev whenever searching code inside the current task workspace, unless the user opts out. This is model guidance, not interception or enforcement of native tools.
 - **Ask only:** the skill tells Codex to use Jev only when explicitly requested. It does not prompt for permission on every ordinary search. An explicit request can cover an ongoing task.
 
 Settings are saved in ignored `jev-context.settings.json`. The command also regenerates `skills/jev-code-search/SKILL.md` from `SKILL.template.md` so skill discovery matches the mode. Edit the template when changing shared instructions. Omitting an option preserves its current value; invalid settings fail rather than silently changing behavior.
@@ -60,8 +62,9 @@ After changing settings, refresh the installed plugin from its marketplace sourc
 
 `search_code` requires `question` and `query`. Optional fields:
 
+- `repository_root`: absolute current workspace/repository directory; required unless a legacy root fallback exists. Codex supplies this from task context. Paths with spaces are passed as structured arguments.
 - `objective`: current information need, alongside the user's full question.
-- `path`: repository-relative directory, default `.`; escapes outside the configured root are rejected.
+- `path`: repository-relative directory, default `.`; escapes outside the selected repository root are rejected.
 - `globs`: up to 12 ripgrep include/exclude globs.
 - `regex`: false by default, so a query is treated literally; shell execution is never used.
 - `case_sensitive`: false by default.
@@ -116,9 +119,9 @@ The usage file is an array of `{name, baseline, filtered}`. Each arm contains `t
 
 Filtered/shadow searches send the question, objective, search query, and code passages to `https://api.typesafe.ai/v1/systemone`. Baseline is local only. The tool does not upload an entire repository. `.env*`, common key files, ignored files, dependency directories, and `.jev-context` are excluded, but this is not a secret scanner: secrets embedded in ordinary source can still be transmitted.
 
-Telemetry is local under `<repository>/.jev-context/<run-id>/` by default. Each directory contains `record.json`, `baseline.txt`, `filtered.txt`, and `actual.txt`. **These files contain original code and user questions, including withheld passages.** Keep this directory private and out of version control; add any custom data directory to ignore rules. Logs persist until deleted. Raw snapshots are retained so post-MVP expansion and reproducible audits are possible. API key values are never logged.
+Telemetry is local under `~/.jev-context/<run-id>/` by default, outside project checkouts. `JEV_CONTEXT_DATA_DIR` or launcher `--data` overrides this. Existing logs are not moved. Every run records its canonical repository root; summaries group by repository and CSV exports include the root. Each directory contains `record.json`, `baseline.txt`, `filtered.txt`, and `actual.txt`. **These files contain original code and user questions, including withheld passages.** Keep this directory private and out of version control; add any custom data directory to ignore rules. Logs persist until deleted. Raw snapshots are retained so post-MVP expansion and reproducible audits are possible. API key values are never logged.
 
-The server runs with the host's filesystem permissions. The root and API configuration are environment-controlled rather than supplied by tool callers. This is a retrieval tool, not a security boundary against a malicious repository or other tools reading files directly.
+The server runs with the host's filesystem permissions. The API configuration is environment-controlled. The repository root is supplied per call; filesystem access follows host permissions, not a fixed repository allowlist. This is a retrieval tool, not a security boundary against a malicious repository or other tools reading files directly.
 
 ## Development and publication
 

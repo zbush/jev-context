@@ -18,7 +18,7 @@ export function readSettings(settingsPath = process.env.JEV_CONTEXT_SETTINGS_FIL
 
 export function usageInstruction(settings) {
   return settings.run_mode === 'auto'
-    ? 'Auto run mode: always use Jev search_code when searching code within the configured repository, without waiting for the user to name Jev. Honor explicit user opt-outs. This is agent guidance, not interception of native tools. If the tool is unavailable or the requested repository is outside its configured root, explain the limitation and use an appropriate available search tool.'
+    ? 'Auto run mode: always use Jev search_code when searching code within the current task workspace, without waiting for the user to name Jev. Honor explicit user opt-outs. This is agent guidance, not interception of native tools. If the tool is unavailable, explain the limitation and use an appropriate available search tool.'
     : 'Ask only mode: use Jev search_code only when the user explicitly asks for Jev code search, Jev relevance filtering, or its benchmark. Do not use it for ordinary code-search requests and do not ask the user to enable it on every search. An explicit Jev request can cover the ongoing task until the user changes it.';
 }
 
@@ -29,5 +29,5 @@ export function receiptInstruction(settings) {
 }
 
 export function toolDescription(settings) {
-  return `${usageInstruction(settings)} Search code with ripgrep and classify passages with Jev before returning relevant evidence. Supply the user question and current retrieval objective. Literal search by default. Filtered mode withholds No/Unknown; baseline returns all candidates without Jev; shadow evaluates Jev but returns all candidates for an explicit comparison. ${receiptInstruction(settings)} Private candidate code is sent to TypeSafe in filtered/shadow modes.`;
+  return `${usageInstruction(settings)} Supply repository_root as the absolute current task workspace path on every call; never use the server working directory as the project. Search code with ripgrep and classify passages with Jev before returning relevant evidence. Supply the user question and current retrieval objective. Literal search by default. Filtered mode withholds No/Unknown; baseline returns all candidates without Jev; shadow evaluates Jev but returns all candidates for an explicit comparison. ${receiptInstruction(settings)} Private candidate code is sent to TypeSafe in filtered/shadow modes.`;
 }

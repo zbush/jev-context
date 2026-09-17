@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, readdir, realpath } from 'node:fs/promises';
+import { loadRecords } from '../src/engine.mjs';
+import { summarize } from '../src/metrics.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +18,7 @@ test(`MCP settings: receipts=${include_receipts}, mode=${run_mode}`, async () =>
   await writeFile(settingsFile, JSON.stringify({ include_receipts, run_mode }));
   const transport = new StdioClientTransport({ command: process.execPath,
     args: [fileURLToPath(new URL('../src/server.mjs', import.meta.url))],
-    env: { ...process.env, JEV_CONTEXT_ROOT: root, JEV_CONTEXT_DATA_DIR: data,
+    env: { ...process.env, JEV_CONTEXT_ROOT: '', JEV_CONTEXT_DATA_DIR: data,
       JEV_CONTEXT_SETTINGS_FILE: settingsFile }, stderr: 'pipe' });
   const client = new Client({ name: 'test-client', version: '1.0.0' });
   try {
@@ -27,7 +29,7 @@ test(`MCP settings: receipts=${include_receipts}, mode=${run_mode}`, async () =>
     assert.match(tools.tools[0].description, run_mode === 'auto' ? /Auto run mode/ : /Ask only mode/);
     assert.match(tools.tools[0].description, include_receipts ? /Receipts are on/ : /Receipts are off/);
     const result = await client.callTool({ name: 'search_code', arguments: {
-      question: 'Where is session defined?', query: 'session', mode: 'baseline' } });
+      repository_root: root, question: 'Where is session defined?', query: 'session', mode: 'baseline' } });
     assert.equal(result.isError, undefined);
     const text = result.content[0].text;
     assert.match(text, /session = 42/);
@@ -46,6 +48,28 @@ test(`MCP settings: receipts=${include_receipts}, mode=${run_mode}`, async () =>
       question: 'Find session', query: 'session', max_candidates: 9999 } });
     assert.equal(bad.isError, true);
     assert.equal((await readdir(data)).length, 1);
+    const other = await mkdtemp(path.join(os.tmpdir(), "jev-other project's-"));
+    await writeFile(path.join(other, 'sample.js'), 'export const session = 999;\n');
+    const call = repository_root => client.callTool({ name: 'search_code', arguments: {
+      repository_root, question: 'Find session', query: 'session', mode: 'baseline' } });
+    const results = await Promise.all([call(root), call(other)]);
+    assert.match(results[0].content[0].text, /session = 42/);
+    assert.doesNotMatch(results[0].content[0].text, /session = 999/);
+    assert.match(results[1].content[0].text, /session = 999/);
+    assert.doesNotMatch(results[1].content[0].text, /session = 42/);
+    const groups = summarize(await loadRecords(data)).groups;
+    assert.equal(groups.length, 2);
+    assert.deepEqual(new Set(groups.map(g => g.repository_root)), new Set(await Promise.all([realpath(root), realpath(other)])));
+    const missing = await client.callTool({ name: 'search_code', arguments: {
+      question: 'Find session', query: 'session', mode: 'baseline' } });
+    assert.equal(missing.isError, true);
+    assert.match(missing.content[0].text, /Supply repository_root/);
+    assert.equal((await call('relative/path')).isError, true);
+    assert.equal((await call(path.join(root, 'sample.js'))).isError, true);
+    assert.equal((await call(path.join(root, 'missing-directory'))).isError, true);
+    const escape = await client.callTool({ name: 'search_code', arguments: {
+      repository_root: root, path: '..', question: 'Find session', query: 'session', mode: 'baseline' } });
+    assert.equal(escape.isError, true);
   } finally { await client.close(); }
 });
 }

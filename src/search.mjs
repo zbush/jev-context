@@ -7,6 +7,9 @@ import { z } from 'zod';
 
 const exec = promisify(execFile);
 export const searchSchema = z.object({
+  repository_root: z.string().min(1).max(4000).refine(value => path.isAbsolute(value),
+    'repository_root must be an absolute path.').optional()
+    .describe('Absolute current task workspace/repository path. Supply on every search; never infer from the MCP server working directory. Required unless a legacy default root is configured.'),
   question: z.string().min(1).max(8000),
   objective: z.string().max(4000).default(''),
   query: z.string().min(1).max(1000),

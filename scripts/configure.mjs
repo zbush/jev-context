@@ -5,15 +5,14 @@ import { fileURLToPath } from 'node:url';
 
 const { values } = parseArgs({ options: { root: { type: 'string' },
   'env-file': { type: 'string' }, rg: { type: 'string' }, data: { type: 'string' } } });
-if (!values.root) throw new Error('--root is required.');
 const pluginRoot = fileURLToPath(new URL('..', import.meta.url));
-const root = await realpath(values.root);
+const root = values.root ? await realpath(values.root) : undefined;
 const args = [];
 if (values['env-file']) args.push(`--env-file=${await realpath(values['env-file'])}`);
 args.push(path.join(pluginRoot, 'src/server.mjs'));
 const config = { mcpServers: { jev_context: {
   command: process.execPath, args, cwd: pluginRoot,
-  env: { JEV_CONTEXT_ROOT: root,
+  env: { JEV_CONTEXT_ROOT: root || '',
     ...(values.rg ? { JEV_CONTEXT_RG: await realpath(values.rg) } : {}),
     ...(values.data ? { JEV_CONTEXT_DATA_DIR: path.resolve(values.data) } : {}) },
   env_vars: ['TYPESAFE_API_KEY', 'TYPESAFE_MODEL', 'JEV_CONTEXT_ENCODING', 'JEV_CONTEXT_CONCURRENCY',
