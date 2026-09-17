@@ -1,0 +1,10 @@
+{
+  "question": "Where is the TypeSafe API timeout enforced and how is it reported?",
+  "objective": "Find request cancellation and timeout error handling.",
+  "query": "request",
+  "path": "src",
+  "globs": ["*.mjs"],
+  "context_lines": 8,
+  "max_candidates": 12,
+  "mode": "filtered"
+}

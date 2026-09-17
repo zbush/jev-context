@@ -1,0 +1,19 @@
+{
+  "name": "jev-context",
+  "version": "0.1.0",
+  "description": "Code search filtered by Jev before context loading, with auditable paired token metrics.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Jev Context",
+    "shortDescription": "Filter code search and measure context savings.",
+    "longDescription": "Retrieve code with ripgrep, judge relevance with Jev, and compare exact saved response payloads, token counts, API usage, and latency.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Use Jev code search and measure the retrieval tokens saved."
+  },
+  "mcpServers": "./.mcp.json"
+}

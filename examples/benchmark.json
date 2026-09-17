@@ -1,0 +1,26 @@
+[
+  {
+    "name": "brotato-api-timeout",
+    "search": {
+      "question": "Where is the TypeSafe API timeout enforced and how is it reported?",
+      "objective": "Find request cancellation and timeout error handling.",
+      "query": "request", "path": "src", "globs": ["*.mjs"], "context_lines": 5, "max_candidates": 12
+    }
+  },
+  {
+    "name": "brotato-observation-order",
+    "search": {
+      "question": "How does the Node controller reject out-of-order observations in a session?",
+      "objective": "Find the observation sequence check and its per-session memory.",
+      "query": "session", "path": "src", "globs": ["*.mjs"], "context_lines": 5, "max_candidates": 12
+    }
+  },
+  {
+    "name": "brotato-shop-policy",
+    "search": {
+      "question": "What instructions guide Jev's choice to reroll or start the next wave in the shop?",
+      "objective": "Find the shop decision rubric rather than combat movement decisions.",
+      "query": "choice", "path": "src", "globs": ["*.mjs"], "context_lines": 10, "max_candidates": 12
+    }
+  }
+]

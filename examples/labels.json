@@ -1,0 +1,13 @@
+{
+  "brotato-api-timeout": [
+    { "file": "src/policy.mjs", "line": 75, "relevant": true },
+    { "file": "src/server.mjs", "line": 56, "relevant": true }
+  ],
+  "brotato-observation-order": [
+    { "file": "src/server.mjs", "line": 33, "relevant": true }
+  ],
+  "brotato-shop-policy": [
+    { "file": "src/economy.mjs", "line": 21, "relevant": true },
+    { "file": "src/economy.mjs", "line": 22, "relevant": true }
+  ]
+}
