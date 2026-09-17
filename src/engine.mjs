@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { retrieve, searchSchema, sha256 } from './search.mjs';
 import { classify, PROMPT_VERSION } from './jev.mjs';
 import { measurePair } from './metrics.mjs';
+import { withReceipts, unavailableReceipt, PAYLOAD_FORMAT } from './receipt.mjs';
 
 export function renderPayload(id, mode, retrieval, candidates) {
   return JSON.stringify({ retrieval_id: id, mode,
@@ -26,6 +27,7 @@ export async function search(input, config, { counter, fetchImpl, retrieveImpl =
   const directory = path.join(config.dataDir, id);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const record = { schema_version: 1, id, timestamp: new Date().toISOString(), status: 'pending',
+    payload_format: PAYLOAD_FORMAT,
     source: config.source || 'cli', experiment: config.experiment || null, mode: args.mode,
     root: config.root, args, prompt_version: PROMPT_VERSION,
     tokenizer: counter.metadata, config: { model: config.model || 'jev-latest',
@@ -59,10 +61,14 @@ export async function search(input, config, { counter, fetchImpl, retrieveImpl =
       [label, record.decisions.filter(d => d.label === label).length]));
     record.counts.not_evaluated = args.mode === 'baseline' ? retrieved.candidates.length : 0;
     const selected = args.mode === 'baseline' ? retrieved.candidates : retrieved.candidates.filter((_, i) => record.decisions[i].label === 'Yes');
-    const baseline = renderPayload(id, 'baseline', retrieved, retrieved.candidates);
-    const filtered = args.mode === 'baseline' ? baseline : renderPayload(id, 'filtered', retrieved, selected);
+    const baselineBody = renderPayload(id, 'baseline', retrieved, retrieved.candidates);
+    const filteredBody = args.mode === 'baseline' ? baselineBody : renderPayload(id, 'filtered', retrieved, selected);
+    const { baseline, filtered, receipt_status } = withReceipts(baselineBody, filteredBody, args.mode, counter);
+    record.receipt_status = receipt_status;
     payload = args.mode === 'filtered' ? filtered : baseline;
     record.metrics = measurePair(baseline, filtered, payload, counter);
+    record.metrics.baseline_receipt_tokens = counter.count(baseline) - counter.count(baselineBody);
+    record.metrics.filtered_receipt_tokens = counter.count(filtered) - counter.count(filteredBody);
     record.metrics.tool_arguments_tokens = counter.count(JSON.stringify(args));
     record.payload_sha256 = { baseline: sha256(baseline), filtered: sha256(filtered), actual: sha256(payload) };
     await Promise.all([['baseline.txt', baseline], ['filtered.txt', filtered], ['actual.txt', payload]]
@@ -71,7 +77,8 @@ export async function search(input, config, { counter, fetchImpl, retrieveImpl =
   } catch (error) {
     record.status = 'error';
     record.error = error.message;
-    payload = JSON.stringify({ retrieval_id: id, error: error.message, source_content_returned: false });
+    payload = JSON.stringify({ retrieval_id: id, error: error.message, source_content_returned: false,
+      token_savings: unavailableReceipt(counter.metadata.encoding) });
     record.error_response_tokens = counter.count(payload);
     await writeFile(path.join(directory, 'actual.txt'), payload, { mode: 0o600 });
   }

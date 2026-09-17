@@ -19,6 +19,18 @@ export async function auditRecords(dataDir, records) {
       for (const [name, value] of Object.entries(measured)) {
         if (r.metrics[name] !== value) errors.push(`${name} count mismatch`);
       }
+      for (const [name, value] of Object.entries({ baseline, filtered, actual })) {
+        const receipt = JSON.parse(value).token_savings;
+        if (receipt?.status === 'measured') {
+          const tokens = counter.count(value);
+          const saved = measured.baseline_response_tokens - tokens;
+          if (receipt.returned_tokens !== tokens || receipt.baseline_tokens !== measured.baseline_response_tokens ||
+              receipt.saved_tokens !== saved || receipt.encoding !== r.tokenizer.encoding ||
+              receipt.reduction_pct !== (receipt.baseline_tokens ? Number((100 * saved / receipt.baseline_tokens).toFixed(1)) : 0)) {
+            errors.push(`${name} savings receipt mismatch`);
+          }
+        }
+      }
       if (sha256(JSON.stringify(r.retrieval.candidates)) !== r.retrieval.snapshot_sha256) errors.push('Candidate snapshot hash mismatch');
       if (counter.metadata.version !== r.tokenizer.version) errors.push('Tokenizer version differs from recorded version');
       const expected = r.mode === 'baseline' ? r.retrieval.candidates.map(c => c.id)

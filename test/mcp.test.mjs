@@ -26,6 +26,9 @@ test('MCP handshake, tool discovery, baseline call, and saved response are consi
     const text = result.content[0].text;
     assert.match(text, /session = 42/);
     const payload = JSON.parse(text);
+    assert.equal(payload.token_savings.status, 'measured');
+    assert.equal(payload.token_savings.saved_tokens, 0);
+    assert.match(payload.token_savings.footer, /baseline mode/);
     const stored = await readFile(path.join(data, payload.retrieval_id, 'actual.txt'), 'utf8');
     assert.equal(text, stored);
     const record = JSON.parse(await readFile(path.join(data, payload.retrieval_id, 'record.json'), 'utf8'));

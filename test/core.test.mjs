@@ -41,6 +41,10 @@ test('only Yes enters response; saved pair reproduces token counts exactly', asy
   assert.equal(result.record.metrics.paired_tokens_saved, counter.count(baseline) - counter.count(result.payload));
   assert.equal(result.record.jev.known_input_tokens, 240);
   assert.equal(result.record.jev.known_output_tokens, 36);
+  const receipt = JSON.parse(result.payload).token_savings;
+  assert.equal(receipt.status, 'measured');
+  assert.equal(receipt.saved_tokens, result.record.metrics.paired_tokens_saved);
+  assert.equal(receipt.returned_tokens, counter.count(result.payload));
   const records = await loadRecords(config.dataDir);
   assert.equal(records.length, 1);
   assert.equal(summarize(records).groups[0].paired_tokens_saved, result.record.metrics.paired_tokens_saved);
@@ -72,6 +76,7 @@ test('Jev failure returns no raw text, records partial cost, and is excluded fro
   assert.equal(result.isError, true);
   assert.doesNotMatch(result.payload, /KEEP_REVOKE|DROP_ANALYTICS|UNKNOWN_USAGE/);
   assert.equal(result.record.metrics, null);
+  assert.equal(JSON.parse(result.payload).token_savings.status, 'unavailable');
   assert.equal(result.record.jev.known_input_tokens, 160);
   assert.equal(result.record.jev.missing_usage_calls, 1);
   assert.equal(summarize([result.record]).groups.length, 0);
