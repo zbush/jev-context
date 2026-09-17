@@ -36,6 +36,26 @@ Use `--rg` with an absolute ripgrep executable path when the app does not inheri
 
 Register/install the package through the Codex personal marketplace, or add its generated command/args/environment as a local STDIO MCP server in Codex settings. Start a new Codex task after installation and ask: **“Use Jev code search to find where TypeSafe timeouts are enforced.”** Installing a plugin doesn't add tools to an already running task. This plugin does not intercept native grep, file reads, or web search; the skill routes the requested workflow through its tool.
 
+## Preferences
+
+Two independent settings default to **receipts on** and **ask only**. Run these commands from the plugin source directory:
+
+```powershell
+# Show current settings
+node scripts/settings.mjs
+# Change either option or both
+node scripts/settings.mjs --receipts off --run-mode auto
+node scripts/settings.mjs --receipts on --run-mode ask-only
+```
+
+- **Receipts on/off:** controls the answer footer and whether tool responses include `token_savings`. Turning receipts off keeps local telemetry and reproducible token counts, with no receipt payload overhead.
+- **Auto run:** the skill tells Codex to use Jev whenever searching code inside the configured repository, unless the user opts out. This is model guidance, not interception or enforcement of native tools.
+- **Ask only:** the skill tells Codex to use Jev only when explicitly requested. It does not prompt for permission on every ordinary search. An explicit request can cover an ongoing task.
+
+Settings are saved in ignored `jev-context.settings.json`. The command also regenerates `skills/jev-code-search/SKILL.md` from `SKILL.template.md` so skill discovery matches the mode. Edit the template when changing shared instructions. Omitting an option preserves its current value; invalid settings fail rather than silently changing behavior.
+
+After changing settings, refresh the installed plugin from its marketplace source and start a new Codex task. If your marketplace uses a separate source mirror, sync the generated skill and local settings there before reinstalling. The MCP launcher continues to read settings beside its source checkout. `JEV_CONTEXT_SETTINGS_FILE` can override that runtime path; keep it consistent with the generated skill. These are local command-line preferences, not toggles in Codex's plugin UI.
+
 ## Tool contract
 
 `search_code` requires `question` and `query`. Optional fields:
@@ -68,11 +88,11 @@ For each call, let `B` be the token count of `baseline.txt`, `F` of `filtered.tx
 
 Counts include the entire saved response text: JSON structure, paths, IDs, counts, notices, and selected code. They use pinned `tiktoken` 1.0.22 with explicit `o200k_base` by default (`JEV_CONTEXT_ENCODING=cl100k_base` is also supported). They are exact for those saved strings under that encoding. **The tokenizer used internally by the current Codex model is not verified. These are not exact host-context or billed token counts.** Tool transport framing, injected tool definitions/skill instructions, the model's tool-call generation, and subsequent turns are outside this payload metric. Tool arguments are counted separately as `tool_arguments_tokens`.
 
-Every response includes a top-level `token_savings` receipt. The tool description and skill instruct Codex to append its `footer` to the final answer, for example: “Jev Context: saved 611 retrieval tokens (37.5%; o200k_base).” This example is illustrative, not a measurement for your current task. Multiple calls are combined by unique retrieval ID and encoding with a weighted percentage. Negative savings are reported as added tokens, and baseline/shadow responses report zero actual savings. Errors report savings as unavailable. Final-answer presentation is guided by the skill; the MCP server cannot force the host model to render a footer.
+With receipts enabled, every search response includes a top-level `token_savings` receipt. The tool description and skill instruct Codex to append its `footer` to the final answer, for example: “Jev Context: saved 611 retrieval tokens (37.5%; o200k_base).” This example is illustrative, not a measurement for your current task. Multiple calls are combined by unique retrieval ID and encoding with a weighted percentage. Negative savings are reported as added tokens, and baseline/shadow responses report zero actual savings. Errors report savings as unavailable. Final-answer presentation is guided by the skill; the MCP server cannot force the host model to render a footer.
 
-Both comparison payloads include their receipts. Counts are recalculated until the embedded receipt numbers match the complete saved strings; if self-referential counts cycle, a nonnumeric "unavailable" receipt is returned while exact telemetry remains available locally. Receipt overhead is also recorded separately. `report --verify` checks embedded numbers, and reports group receipt-bearing payloads separately from older payload formats. The model's final-answer footer itself is outside these tool-response counts.
+When enabled, both comparison payloads include their receipts. Counts are recalculated until the embedded receipt numbers match the complete saved strings; if self-referential counts cycle, a nonnumeric "unavailable" receipt is returned while exact telemetry remains available locally. Receipt overhead is also recorded separately. `report --verify` checks embedded numbers, and reports group receipt-bearing payloads separately from older payload formats. The model's final-answer footer itself is outside these tool-response counts.
 
-Records also include UTF-8 byte counts, payload/candidate SHA-256 hashes, exact requests without credentials, all judgments/probabilities, model versions returned by TypeSafe, API input/output usage, per-candidate latency, retrieval time, Jev wall time, and total processing time. Total processing time includes payload writes but excludes writing the final record and MCP transport. Reports group different modes, sources, tokenizer versions, prompts, requested models, and thresholds separately. Negative savings are preserved.
+Records also include UTF-8 byte counts, payload/candidate SHA-256 hashes, exact requests without credentials, all judgments/probabilities, model versions returned by TypeSafe, API input/output usage, per-candidate latency, retrieval time, Jev wall time, and total processing time. Total processing time includes payload writes but excludes writing the final record and MCP transport. Reports group different modes, sources, tokenizer versions, prompts, requested models, thresholds, run modes, and payload formats separately. Negative savings are preserved.
 
 **Jev token usage is separate from Codex payload tokens.** Sending more tokens through a cheaper classifier can still be useful, but token counts across different models are not interchangeable dollars. No pricing or dollar-saving claim is built in. Missing usage may include chargeable failed calls.
 

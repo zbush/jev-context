@@ -9,7 +9,8 @@
     "test": "node --test test/*.test.mjs",
     "search": "node src/cli.mjs search",
     "report": "node src/cli.mjs report",
-    "benchmark": "node src/cli.mjs benchmark"
+    "benchmark": "node src/cli.mjs benchmark",
+    "settings": "node scripts/settings.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

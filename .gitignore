@@ -4,6 +4,9 @@ node_modules/
 .env*
 !.env.example
 .mcp.json
+jev-context.settings.json
+jev-context.settings.json.tmp
+SKILL.md.tmp
 reports/
 logs/
 artifacts/

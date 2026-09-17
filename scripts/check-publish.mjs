@@ -14,7 +14,7 @@ const secretPatterns = [
 ];
 for (const file of files) {
   const base = file.split('/').at(-1);
-  if (forbiddenPath.test(file) || (base.startsWith('.env') && base !== '.env.example')) {
+  if (forbiddenPath.test(file) || base.startsWith('jev-context.settings.json') || base === 'SKILL.md.tmp' || (base.startsWith('.env') && base !== '.env.example')) {
     violations.push(`${file}: excluded local/benchmark/credential file`);
     continue;
   }

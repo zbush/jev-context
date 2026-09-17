@@ -33,6 +33,7 @@ export function summarize(records) {
   for (const r of successful) {
     const key = JSON.stringify({ encoding: r.tokenizer.encoding, tokenizer_version: r.tokenizer.version,
       payload_format: r.payload_format || 'legacy-v1',
+      run_mode: r.config.run_mode || 'ask-only',
       mode: r.mode, source: r.source, requested_model: r.config.model, prompt: r.prompt_version,
       min_yes_probability: r.config.min_yes_probability });
     if (!groups.has(key)) groups.set(key, []);

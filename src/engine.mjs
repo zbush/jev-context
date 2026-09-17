@@ -22,16 +22,18 @@ export function renderPayload(id, mode, retrieval, candidates) {
 export async function search(input, config, { counter, fetchImpl, retrieveImpl = retrieve,
   classifyImpl = classify, signal } = {}) {
   const args = searchSchema.parse(input);
+  const includeReceipts = config.includeReceipts ?? true;
   const id = randomUUID();
   const started = performance.now();
   const directory = path.join(config.dataDir, id);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const record = { schema_version: 1, id, timestamp: new Date().toISOString(), status: 'pending',
-    payload_format: PAYLOAD_FORMAT,
+    payload_format: includeReceipts ? PAYLOAD_FORMAT : 'no-receipt-v1',
     source: config.source || 'cli', experiment: config.experiment || null, mode: args.mode,
     root: config.root, args, prompt_version: PROMPT_VERSION,
     tokenizer: counter.metadata, config: { model: config.model || 'jev-latest',
-      min_yes_probability: config.minYesProbability || 0, concurrency: config.concurrency || 4 },
+      min_yes_probability: config.minYesProbability || 0, concurrency: config.concurrency || 4,
+      include_receipts: includeReceipts, run_mode: config.runMode || 'ask-only' },
     timing: {}, jev: { calls: 0, known_input_tokens: 0, known_output_tokens: 0, missing_usage_calls: 0 },
     decisions: [], metrics: null };
   let payload;
@@ -63,7 +65,9 @@ export async function search(input, config, { counter, fetchImpl, retrieveImpl =
     const selected = args.mode === 'baseline' ? retrieved.candidates : retrieved.candidates.filter((_, i) => record.decisions[i].label === 'Yes');
     const baselineBody = renderPayload(id, 'baseline', retrieved, retrieved.candidates);
     const filteredBody = args.mode === 'baseline' ? baselineBody : renderPayload(id, 'filtered', retrieved, selected);
-    const { baseline, filtered, receipt_status } = withReceipts(baselineBody, filteredBody, args.mode, counter);
+    const { baseline, filtered, receipt_status } = includeReceipts
+      ? withReceipts(baselineBody, filteredBody, args.mode, counter)
+      : { baseline: baselineBody, filtered: filteredBody, receipt_status: 'disabled' };
     record.receipt_status = receipt_status;
     payload = args.mode === 'filtered' ? filtered : baseline;
     record.metrics = measurePair(baseline, filtered, payload, counter);
@@ -78,7 +82,7 @@ export async function search(input, config, { counter, fetchImpl, retrieveImpl =
     record.status = 'error';
     record.error = error.message;
     payload = JSON.stringify({ retrieval_id: id, error: error.message, source_content_returned: false,
-      token_savings: unavailableReceipt(counter.metadata.encoding) });
+      ...(includeReceipts ? { token_savings: unavailableReceipt(counter.metadata.encoding) } : {}) });
     record.error_response_tokens = counter.count(payload);
     await writeFile(path.join(directory, 'actual.txt'), payload, { mode: 0o600 });
   }

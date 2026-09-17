@@ -1,11 +1,11 @@
 ---
 name: jev-code-search
-description: Use Jev code search only when the user explicitly requests Jev, Jev relevance filtering, or its benchmark. Do not use for ordinary code searches.
+description: {{description}}
 ---
 
 # Jev code search
 
-Ask only mode: use Jev search_code only when the user explicitly asks for Jev code search, Jev relevance filtering, or its benchmark. Do not use it for ordinary code-search requests and do not ask the user to enable it on every search. An explicit Jev request can cover the ongoing task until the user changes it.
+{{usage}}
 
 Use the plugin's `search_code` MCP tool for code retrieval in this workflow. Pass the user's question, your immediate retrieval objective, a literal search query (or `regex: true`), and a repository-relative directory. The server is bound to one configured repository root.
 
@@ -17,9 +17,9 @@ For comparison, `baseline` returns admitted candidates with no Jev calls. `shado
 
 ## Answer receipts
 
-Receipts are on. Append token_savings.footer to the final answer after using this tool. For multiple distinct retrieval_ids, sum saved_tokens and baseline_tokens per encoding and compute a weighted percentage. State unavailable receipts separately. These are retrieval payload savings, not total billing.
+{{receipts}}
 
-For one call, copy the top-level `token_savings.footer` exactly. For multiple calls used in this answer, deduplicate by `retrieval_id`, group by encoding, sum `saved_tokens` and `baseline_tokens`, and calculate `100 * total_saved / total_baseline` (0 when the denominator is 0). Say "added N retrieval tokens" for a negative sum. Include the encoding and number of searches. Do not sum percentages, mix encodings, repeat earlier turns' receipts, or count shadow-mode hypothetical savings. Mention unavailable/error receipts separately, including failed calls without a receipt; never assume they saved zero. If every receipt is unavailable, say "Jev Context: retrieval token savings unavailable." Do not read raw logs to build the footer. Tool receipt counts exclude the final-answer footer and whole-task costs.
+{{receipt_details}}
 
 ## Local metrics and settings
 
