@@ -2,6 +2,8 @@
 
 A local Codex plugin that runs ripgrep, classifies candidate code passages with Jev, and returns only `Yes` passages. It records paired filtered/unfiltered payloads so retrieval savings can be reproduced exactly under a named tokenizer.
 
+Install once for use across local projects. Codex supplies the current workspace on each search, so switching repositories needs no plugin reconfiguration. Global preferences control whether Jev is used automatically or only on request, and whether answers include token-savings receipts. Defaults are **ask only** and **receipts on**.
+
 This repository contains the plugin only. The initial smoke tests used a separate Brotato project; its source, credentials, and benchmark outputs are not included.
 
 ## Run locally
@@ -38,6 +40,16 @@ Use `--rg` with an absolute ripgrep executable path when the app does not inheri
 
 Register/install the package through the Codex personal marketplace, or add its generated command/args/environment as a local STDIO MCP server in Codex settings. Start a new Codex task after installation and ask: **“Use Jev code search to find where TypeSafe timeouts are enforced.”** Installing a plugin doesn't add tools to an already running task. This plugin does not intercept native grep, file reads, or web search; the skill routes the requested workflow through its tool.
 
+The workflow skill is part of the plugin installation. Registering only the MCP server exposes the tool and its description, but does not install the companion skill. Global availability applies to local tasks that load this plugin; it does not install the plugin on other computers or cloud environments.
+
+Check the generated launcher against any local project before making paid requests:
+
+```powershell
+node scripts/check-connection.mjs --root "$repoPath"
+```
+
+This performs an MCP handshake, tool discovery, and a baseline search designed to return no matches. It writes a local run record, makes zero Jev calls, and does not test the TypeSafe credential or live classification. Pass `--config` to check a different launcher, such as an installed copy. The `--root` here selects only the check's repository; it does not bind the plugin to it.
+
 ## Preferences
 
 Two independent settings default to **receipts on** and **ask only**. Run these commands from the plugin source directory:
@@ -60,9 +72,14 @@ After changing settings, refresh the installed plugin from its marketplace sourc
 
 ## Tool contract
 
-`search_code` requires `question` and `query`. Optional fields:
+`search_code` requires `question` and `query`. In the default global setup, also supply `repository_root` on every call:
 
 - `repository_root`: absolute current workspace/repository directory; required unless a legacy root fallback exists. Codex supplies this from task context. Paths with spaces are passed as structured arguments.
+
+The root must exist and be a directory. The server resolves its canonical path for retrieval and telemetry. For tasks with multiple workspaces, issue separate searches with the appropriate root for each. It does not guess the project from the server's working directory.
+
+Optional fields:
+
 - `objective`: current information need, alongside the user's full question.
 - `path`: repository-relative directory, default `.`; escapes outside the selected repository root are rejected.
 - `globs`: up to 12 ripgrep include/exclude globs.
@@ -91,11 +108,11 @@ For each call, let `B` be the token count of `baseline.txt`, `F` of `filtered.tx
 
 Counts include the entire saved response text: JSON structure, paths, IDs, counts, notices, and selected code. They use pinned `tiktoken` 1.0.22 with explicit `o200k_base` by default (`JEV_CONTEXT_ENCODING=cl100k_base` is also supported). They are exact for those saved strings under that encoding. **The tokenizer used internally by the current Codex model is not verified. These are not exact host-context or billed token counts.** Tool transport framing, injected tool definitions/skill instructions, the model's tool-call generation, and subsequent turns are outside this payload metric. Tool arguments are counted separately as `tool_arguments_tokens`.
 
-With receipts enabled, every search response includes a top-level `token_savings` receipt. The tool description and skill instruct Codex to append its `footer` to the final answer, for example: “Jev Context: saved 611 retrieval tokens (37.5%; o200k_base).” This example is illustrative, not a measurement for your current task. Multiple calls are combined by unique retrieval ID and encoding with a weighted percentage. Negative savings are reported as added tokens, and baseline/shadow responses report zero actual savings. Errors report savings as unavailable. Final-answer presentation is guided by the skill; the MCP server cannot force the host model to render a footer.
+With receipts enabled, completed search responses include a top-level `token_savings` receipt. The tool description and skill instruct Codex to append its `footer` to the final answer, for example: “Jev Context: saved 611 retrieval tokens (37.5%; o200k_base).” This example is illustrative, not a measurement for your current task. Multiple calls are combined by unique retrieval ID and encoding with a weighted percentage. Negative savings are reported as added tokens, and baseline/shadow responses report zero actual savings. Recorded search errors report savings as unavailable; protocol validation failures may have no receipt. Final-answer presentation is guided by the skill; the MCP server cannot force the host model to render a footer.
 
 When enabled, both comparison payloads include their receipts. Counts are recalculated until the embedded receipt numbers match the complete saved strings; if self-referential counts cycle, a nonnumeric "unavailable" receipt is returned while exact telemetry remains available locally. Receipt overhead is also recorded separately. `report --verify` checks embedded numbers, and reports group receipt-bearing payloads separately from older payload formats. The model's final-answer footer itself is outside these tool-response counts.
 
-Records also include UTF-8 byte counts, payload/candidate SHA-256 hashes, exact requests without credentials, all judgments/probabilities, model versions returned by TypeSafe, API input/output usage, per-candidate latency, retrieval time, Jev wall time, and total processing time. Total processing time includes payload writes but excludes writing the final record and MCP transport. Reports group different modes, sources, tokenizer versions, prompts, requested models, thresholds, run modes, and payload formats separately. Negative savings are preserved.
+Records also include UTF-8 byte counts, payload/candidate SHA-256 hashes, exact requests without credentials, all judgments/probabilities, model versions returned by TypeSafe, API input/output usage, per-candidate latency, retrieval time, Jev wall time, and total processing time. Total processing time includes payload writes but excludes writing the final record and MCP transport. Reports group different repositories, modes, sources, tokenizer versions, prompts, requested models, thresholds, run modes, and payload formats separately. Negative savings are preserved.
 
 **Jev token usage is separate from Codex payload tokens.** Sending more tokens through a cheaper classifier can still be useful, but token counts across different models are not interchangeable dollars. No pricing or dollar-saving claim is built in. Missing usage may include chargeable failed calls.
 
@@ -119,7 +136,7 @@ The usage file is an array of `{name, baseline, filtered}`. Each arm contains `t
 
 Filtered/shadow searches send the question, objective, search query, and code passages to `https://api.typesafe.ai/v1/systemone`. Baseline is local only. The tool does not upload an entire repository. `.env*`, common key files, ignored files, dependency directories, and `.jev-context` are excluded, but this is not a secret scanner: secrets embedded in ordinary source can still be transmitted.
 
-Telemetry is local under `~/.jev-context/<run-id>/` by default, outside project checkouts. `JEV_CONTEXT_DATA_DIR` or launcher `--data` overrides this. Existing logs are not moved. Every run records its canonical repository root; summaries group by repository and CSV exports include the root. Each directory contains `record.json`, `baseline.txt`, `filtered.txt`, and `actual.txt`. **These files contain original code and user questions, including withheld passages.** Keep this directory private and out of version control; add any custom data directory to ignore rules. Logs persist until deleted. Raw snapshots are retained so post-MVP expansion and reproducible audits are possible. API key values are never logged.
+Telemetry is local under `~/.jev-context/<run-id>/` by default, outside project checkouts. `JEV_CONTEXT_DATA_DIR` or launcher `--data` overrides this. Existing logs are not moved. Successful runs record their canonical repository root; summaries group by repository and CSV exports include the root. Successful run directories contain `record.json`, `baseline.txt`, `filtered.txt`, and `actual.txt`. Failed runs may contain only the error record and actual response. **These files contain original code and user questions, including withheld passages.** Keep this directory private and out of version control; add any custom data directory to ignore rules. Logs persist until deleted. Raw snapshots are retained so post-MVP expansion and reproducible audits are possible. API key values are never logged.
 
 The server runs with the host's filesystem permissions. The API configuration is environment-controlled. The repository root is supplied per call; filesystem access follows host permissions, not a fixed repository allowlist. This is a retrieval tool, not a security boundary against a malicious repository or other tools reading files directly.
 
@@ -127,7 +144,15 @@ The server runs with the host's filesystem permissions. The API configuration is
 
 Run `node --test test/*.test.mjs` before pushing. The suite runs offline without API keys or live Jev calls. Configure the local commit guard once per clone with `git config core.hooksPath .githooks`; it checks indexed files for excluded outputs, common credential patterns, and local user paths. Run `node scripts/check-publish.mjs` manually to inspect the exact commit contents. When `TYPESAFE_API_KEY` is in the environment, the guard also checks for that exact value without printing it. This targeted guard is not a comprehensive secret scanner.
 
-Credentials (`.env*`, except the blank `.env.example`), generated `.mcp.json`, raw telemetry, reports, CSV/JSONL outputs, and dependencies stay local. Only benchmark **definitions** and manually reviewed label definitions belong in source control. Never force-add generated run records or response payloads. Custom output locations must also be ignored.
+Credentials (`.env*`, except the blank `.env.example`), generated `.mcp.json`, local `jev-context.settings.json`, raw telemetry, reports, CSV/JSONL outputs, and dependencies stay local. Only benchmark **definitions** and manually reviewed label definitions belong in source control. Never force-add generated run records or response payloads. Custom output locations must also be ignored.
+
+Before publishing, stage only intended source/documentation changes and inspect `git diff --cached --stat` and `git diff --cached --check`. Run the publication check against that exact index with the local key loaded, when available:
+
+```powershell
+node --env-file=.env scripts/check-publish.mjs
+```
+
+Use the path to your existing environment file if it lives elsewhere; never copy its contents into Git. The guard checks all indexed files, including files force-added despite ignore rules, and reports filenames without printing matched secrets. Keep the GitHub repository private. Do not bypass the guard or include raw `runs.csv`, response snapshots, generated reports, credentials, or machine-specific launchers in a commit. Local preference changes also regenerate the tracked skill; review that diff so personal settings are not unintentionally published as shared defaults.
 
 ## Sources
 
