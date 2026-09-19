@@ -4,7 +4,7 @@ import { readSettings } from './settings.mjs';
 
 export function configFromEnv(root = process.env.JEV_CONTEXT_ROOT) {
   const concurrency = Number(process.env.JEV_CONTEXT_CONCURRENCY || 4);
-  const minYesProbability = Number(process.env.JEV_CONTEXT_MIN_YES_PROBABILITY || 0);
+  const minYesProbability = Number(process.env.JEV_CONTEXT_MIN_YES_PROBABILITY || 0.5);
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8) throw new Error('Concurrency must be 1–8.');
   if (!Number.isFinite(minYesProbability) || minYesProbability < 0 || minYesProbability > 1) throw new Error('Minimum Yes probability must be 0–1.');
   const settings = readSettings();

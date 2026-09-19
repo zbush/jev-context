@@ -14,7 +14,7 @@ export async function configureSettings(pluginRoot, changes) {
   const skill = template.replace('{{description}}', description)
     .replace('{{usage}}', usageInstruction(settings))
     .replace('{{receipts}}', receiptInstruction(settings))
-    .replace('{{receipt_details}}', settings.include_receipts ? RECEIPT_DETAILS : '');
+    .replace('{{receipt_details}}', settings.include_receipts ? `${RECEIPT_DETAILS}\n\n${EXPANSION_RECEIPT_DETAILS}` : '');
   const skillPath = path.join(pluginRoot, 'skills/jev-code-search/SKILL.md');
   await mkdir(path.dirname(skillPath), { recursive: true });
   // Validate and render before touching either file. Atomic replacement protects
@@ -27,6 +27,8 @@ export async function configureSettings(pluginRoot, changes) {
 }
 
 const RECEIPT_DETAILS = 'For one call, copy the top-level `token_savings.footer` exactly. For multiple calls used in this answer, deduplicate by `retrieval_id`, group by encoding, sum `saved_tokens` and `baseline_tokens`, and calculate `100 * total_saved / total_baseline` (0 when the denominator is 0). Say "added N retrieval tokens" for a negative sum. Include the encoding and number of searches. Do not sum percentages, mix encodings, repeat earlier turns\' receipts, or count shadow-mode hypothetical savings. Mention unavailable/error receipts separately, including failed calls without a receipt; never assume they saved zero. If every receipt is unavailable, say "Jev Context: retrieval token savings unavailable." Do not read raw logs to build the footer. Tool receipt counts exclude the final-answer footer and whole-task costs.';
+
+const EXPANSION_RECEIPT_DETAILS = 'Expansion receipts count added context: saved_tokens is negative and baseline_tokens is zero. Include each expansion response by its own retrieval_id when summing receipts with the original search; never count the original baseline again. If only expansions are included, report added tokens without a percentage. Repeated expansions are distinct responses and each adds context cost.';
 
 async function main() {
   const { values } = parseArgs({ options: { receipts: { type: 'string' }, 'run-mode': { type: 'string' } } });

@@ -7,6 +7,9 @@ import { createCounter, summarize } from './metrics.mjs';
 import { search, loadRecords } from './engine.mjs';
 import { compareTaskUsage } from './task-usage.mjs';
 import { auditRecords } from './audit.mjs';
+import { expand } from './expansion.mjs';
+import { expandContext } from './context.mjs';
+import { selectedCandidates } from './selection.mjs';
 
 const { values: opts, positionals } = parseArgs({ allowPositionals: true, options: {
   root: { type: 'string' }, input: { type: 'string' }, data: { type: 'string' },
@@ -17,7 +20,7 @@ const { values: opts, positionals } = parseArgs({ allowPositionals: true, option
 const command = positionals[0];
 
 function csv(rows) {
-  const keys = ['id', 'timestamp', 'root', 'status', 'mode', 'source', 'experiment', 'baseline_response_tokens',
+  const keys = ['id', 'source_retrieval_id', 'operation', 'timestamp', 'root', 'status', 'mode', 'source', 'experiment', 'baseline_response_tokens',
     'filtered_response_tokens', 'actual_response_tokens', 'paired_tokens_saved', 'paired_reduction_pct',
     'actual_vs_baseline_tokens_saved', 'jev_known_input_tokens', 'jev_known_output_tokens',
     'jev_missing_usage_calls', 'retrieval_ms', 'jev_wall_ms', 'total_ms'];
@@ -33,11 +36,11 @@ function csv(rows) {
 export function quality(records, labels) {
   return records.map(r => {
     const anchors = labels[r.experiment];
-    if (!anchors || r.status !== 'ok' || r.mode === 'baseline') return { id: r.id, evaluated: false };
+    if (!anchors || r.status !== 'ok' || r.mode === 'baseline' || r.mode === 'expansion') return { id: r.id, evaluated: false };
     const relevant = anchors.filter(a => a.relevant === true);
     const covers = (c, a) => c.file === a.file && c.start_line <= a.line && c.end_line >= a.line;
     const candidates = r.retrieval.candidates;
-    const selected = candidates.filter((_, i) => r.decisions[i].label === 'Yes');
+    const selected = selectedCandidates(r);
     const retrieved = relevant.filter(a => candidates.some(c => covers(c, a)));
     const retained = retrieved.filter(a => selected.some(c => covers(c, a)));
     return { id: r.id, experiment: r.experiment, evaluated: true,
@@ -50,8 +53,8 @@ export function quality(records, labels) {
 }
 
 async function main() {
-  if (!['search', 'benchmark', 'report'].includes(command)) {
-    throw new Error('Usage: node src/cli.mjs search|benchmark --root DIR --input FILE [--data DIR] | report --data DIR --out DIR [--labels FILE]');
+  if (!['search', 'expand', 'expand-context', 'benchmark', 'report'].includes(command)) {
+    throw new Error('Usage: node src/cli.mjs search|expand|expand-context|benchmark --input FILE [--root DIR] [--data DIR] | report --data DIR --out DIR [--labels FILE]');
   }
   if (command === 'report') {
     if (!opts.data) throw new Error('--data is required.');
@@ -79,8 +82,9 @@ async function main() {
   const counter = createCounter(config.encoding);
   try {
     const input = JSON.parse(await readFile(opts.input, 'utf8'));
-    if (command === 'search') {
-      const result = await search(input, config, { counter });
+    if (['search', 'expand', 'expand-context'].includes(command)) {
+      const operation = command === 'expand-context' ? expandContext : command === 'expand' ? expand : search;
+      const result = await operation(input, config, { counter });
       console.log(result.payload);
       console.error(JSON.stringify({ run: result.record.id, directory: result.directory, metrics: result.record.metrics }));
       if (result.isError) process.exitCode = 1;

@@ -5,9 +5,12 @@ import { retrieve, searchSchema, sha256 } from './search.mjs';
 import { classify, PROMPT_VERSION } from './jev.mjs';
 import { measurePair } from './metrics.mjs';
 import { withReceipts, unavailableReceipt, PAYLOAD_FORMAT } from './receipt.mjs';
+import { selectedCandidates, scoreSummary, passages } from './selection.mjs';
+import { withStorage } from './storage.mjs';
 
-export function renderPayload(id, mode, retrieval, candidates) {
+export function renderPayload(id, mode, retrieval, candidates, scoring = null, decisions = []) {
   return JSON.stringify({ retrieval_id: id, mode,
+    ...(scoring ? { scoring } : {}),
     counts: { returned: candidates.length, withheld: retrieval.candidates.length - candidates.length },
     coverage: { candidates_found: retrieval.candidates_found,
       omitted_candidate_cap: retrieval.omitted_candidate_cap, omitted_long_lines: retrieval.omitted_long_lines },
@@ -15,26 +18,31 @@ export function renderPayload(id, mode, retrieval, candidates) {
       : mode === 'filtered' && retrieval.candidates.length
         ? 'No passages passed the relevance filter. This does not mean no evidence exists.'
         : 'No matching passages were admitted by this search.',
-    results: candidates.map(({ id, file, start_line, end_line, text }) => ({ id, file, start_line, end_line, text })),
+    results: passages(candidates, decisions),
   });
 }
 
-export async function search(input, config, { counter, fetchImpl, retrieveImpl = retrieve,
-  classifyImpl = classify, signal } = {}) {
-  const args = searchSchema.parse(input);
+export async function search(input, config, options = {}) {
+  const id = randomUUID();
+  return withStorage(config.dataDir, id, () => searchRun(input, config, options, id));
+}
+
+async function searchRun(input, config, { counter, fetchImpl, retrieveImpl = retrieve,
+  classifyImpl = classify, signal } = {}, id) {
+  const args = searchSchema.parse({ ...input,
+    min_yes_probability: input.min_yes_probability ?? config.minYesProbability ?? 0.5 });
   // Per-call copies prevent concurrent tasks from changing each other's root.
   config = { ...config, root: args.repository_root || config.root };
   const includeReceipts = config.includeReceipts ?? true;
-  const id = randomUUID();
   const started = performance.now();
   const directory = path.join(config.dataDir, id);
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const record = { schema_version: 1, id, timestamp: new Date().toISOString(), status: 'pending',
-    payload_format: includeReceipts ? PAYLOAD_FORMAT : 'no-receipt-v1',
+  const record = { schema_version: 2, operation: 'search', id, timestamp: new Date().toISOString(), status: 'pending',
+    payload_format: includeReceipts ? PAYLOAD_FORMAT : 'no-receipt-v2',
     source: config.source || 'cli', experiment: config.experiment || null, mode: args.mode,
     root: config.root, args, prompt_version: PROMPT_VERSION,
     tokenizer: counter.metadata, config: { model: config.model || 'jev-latest',
-      min_yes_probability: config.minYesProbability || 0, concurrency: config.concurrency || 4,
+      min_yes_probability: args.min_yes_probability, concurrency: config.concurrency || 4,
       include_receipts: includeReceipts, run_mode: config.runMode || 'ask-only' },
     timing: {}, jev: { calls: 0, known_input_tokens: 0, known_output_tokens: 0, missing_usage_calls: 0 },
     decisions: [], metrics: null };
@@ -51,7 +59,7 @@ export async function search(input, config, { counter, fetchImpl, retrieveImpl =
     if (args.mode !== 'baseline') {
       record.decisions = await classifyImpl(args, retrieved.candidates, { key: config.key,
         model: record.config.model, concurrency: record.config.concurrency,
-        minYesProbability: record.config.min_yes_probability, fetchImpl, signal });
+        fetchImpl, signal });
     }
     record.timing.jev_wall_ms = Math.round(performance.now() - classifyStarted);
     record.jev.calls = record.decisions.length;
@@ -65,12 +73,14 @@ export async function search(input, config, { counter, fetchImpl, retrieveImpl =
     record.jev.resolved_models = [...new Set(record.decisions.map(d => d.model).filter(Boolean))];
     const failed = record.decisions.filter(d => d.error);
     if (failed.length) throw new Error(`${failed.length} Jev classifications failed; no source content returned. See the local run record.`);
-    record.counts = Object.fromEntries(['Yes', 'No', 'Unknown'].map(label =>
+    record.counts = Object.fromEntries(['Yes', 'No'].map(label =>
       [label, record.decisions.filter(d => d.label === label).length]));
     record.counts.not_evaluated = args.mode === 'baseline' ? retrieved.candidates.length : 0;
-    const selected = args.mode === 'baseline' ? retrieved.candidates : retrieved.candidates.filter((_, i) => record.decisions[i].label === 'Yes');
-    const baselineBody = renderPayload(id, 'baseline', retrieved, retrieved.candidates);
-    const filteredBody = args.mode === 'baseline' ? baselineBody : renderPayload(id, 'filtered', retrieved, selected);
+    const selected = selectedCandidates(record);
+    record.counts.selected = selected.length;
+    const scoring = args.mode === 'baseline' ? null : scoreSummary(record.decisions, args.min_yes_probability);
+    const baselineBody = renderPayload(id, 'baseline', retrieved, retrieved.candidates, scoring, record.decisions);
+    const filteredBody = args.mode === 'baseline' ? baselineBody : renderPayload(id, 'filtered', retrieved, selected, scoring, record.decisions);
     const { baseline, filtered, receipt_status } = includeReceipts
       ? withReceipts(baselineBody, filteredBody, args.mode, counter)
       : { baseline: baselineBody, filtered: filteredBody, receipt_status: 'disabled' };

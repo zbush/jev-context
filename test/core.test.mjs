@@ -13,7 +13,7 @@ import { quality } from '../src/cli.mjs';
 const counter = createCounter();
 test.after(() => counter.free());
 const answer = choice => ({ type: 'choice', choice, confidence: 1,
-  probabilities: Object.fromEntries(['Yes', 'No', 'Unknown'].map(k => [k, Number(k === choice)])) });
+  probabilities: Object.fromEntries(['Yes', 'No'].map(k => [k, Number(k === choice)])) });
 const response = (choice, usage = { input_tokens: 80, output_tokens: 12 }) => ({ ok: true, status: 200,
   json: async () => ({ model: 'test-double', usage, answers: { relevance: answer(choice) } }) });
 const input = { question: 'How are sessions revoked?', query: 'session', context_lines: 0 };
@@ -27,16 +27,16 @@ async function fixture() {
 }
 const judge = async (_, options) => {
   const text = JSON.parse(options.body).state.candidate.text;
-  return response(text.includes('KEEP') ? 'Yes' : text.includes('DROP') ? 'No' : 'Unknown');
+  return response(text.includes('KEEP') ? 'Yes' : 'No');
 };
 
-test('only Yes enters response; saved pair reproduces token counts exactly', async () => {
+test('default threshold selects relevant evidence; saved pair reproduces token counts exactly', async () => {
   const config = await fixture();
   const result = await search(input, config, { counter, fetchImpl: judge });
   assert.equal(result.isError, false);
   assert.match(result.payload, /KEEP_REVOKE/);
   assert.doesNotMatch(result.payload, /DROP_ANALYTICS|UNKNOWN_USAGE|SECRET_NEVER_SEND/);
-  assert.deepEqual(result.record.counts, { Yes: 1, No: 1, Unknown: 1, not_evaluated: 0 });
+  assert.deepEqual(result.record.counts, { Yes: 1, No: 2, not_evaluated: 0, selected: 1 });
   const baseline = await readFile(path.join(result.directory, 'baseline.txt'), 'utf8');
   assert.equal(result.record.metrics.paired_tokens_saved, counter.count(baseline) - counter.count(result.payload));
   assert.equal(result.record.jev.known_input_tokens, 240);
@@ -176,17 +176,18 @@ test('custom telemetry directory is excluded before classification', async () =>
   assert.ok(!JSON.stringify(result.record).includes('PRIVATE_TELEMETRY'));
 });
 
-test('low-probability Yes becomes Unknown without losing the original judgment', async () => {
-  const r = await classify(input, [{ id: 'a', text: 'code' }], { key: 'x', minYesProbability: 0.8,
+test('classifier preserves binary probabilities independently of selection policy', async () => {
+  const r = await classify(input, [{ id: 'a', text: 'code' }], { key: 'x',
     fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ model: 'test', usage: {},
       answers: { relevance: { type: 'choice', choice: 'Yes', confidence: 0.1,
-        probabilities: { Yes: 0.5, No: 0.3, Unknown: 0.2 } } } }) }) });
-  assert.equal(r[0].label, 'Unknown');
+        probabilities: { Yes: 0.6, No: 0.4 } } } }) }) });
+  assert.equal(r[0].label, 'Yes');
   assert.equal(r[0].answer.choice, 'Yes');
   assert.equal(r[0].usage, null);
 });
 
 test('classification response validation rejects malformed distributions', () => {
+  assert.throws(() => validateAnswer({ ...answer('Yes'), probabilities: { Yes: 0, No: 1 } }));
   assert.throws(() => validateAnswer({ ...answer('Yes'), probabilities: { Yes: 0, No: 1, Unknown: 0 } }));
 });
 

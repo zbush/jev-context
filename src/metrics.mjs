@@ -32,6 +32,7 @@ export function summarize(records) {
   const groups = new Map();
   for (const r of successful) {
     const key = JSON.stringify({ repository_root: r.root || null,
+      operation: r.operation || 'search',
       encoding: r.tokenizer.encoding, tokenizer_version: r.tokenizer.version,
       payload_format: r.payload_format || 'legacy-v1',
       run_mode: r.config.run_mode || 'ask-only',
@@ -54,17 +55,19 @@ export function summarize(records) {
       const times = rows.map(r => r.timing.total_ms).sort((a, b) => a - b);
       return { ...JSON.parse(key), runs: rows.length, baseline_response_tokens: b,
         filtered_response_tokens: f, actual_response_tokens: a, paired_tokens_saved: b - f,
-        weighted_reduction_pct: b ? 100 * (b - f) / b : 0, actual_vs_baseline_tokens_saved: b - a,
+        weighted_reduction_pct: rows[0].mode === 'expansion' ? null : b ? 100 * (b - f) / b : 0, actual_vs_baseline_tokens_saved: b - a,
         latency_p50_ms: times[Math.ceil(times.length * 0.5) - 1],
         latency_p95_ms: times[Math.ceil(times.length * 0.95) - 1],
         jev_known_input_tokens: sum(rows, r => r.jev.known_input_tokens),
         jev_known_output_tokens: sum(rows, r => r.jev.known_output_tokens),
-        omitted_candidate_cap: sum(rows, r => r.retrieval.omitted_candidate_cap),
-        zero_yes_runs: rows.filter(r => r.mode !== 'baseline' && r.counts.Yes === 0).length };
+        omitted_candidate_cap: sum(rows, r => r.retrieval?.omitted_candidate_cap || 0),
+        zero_yes_runs: rows.filter(r => r.mode !== 'expansion' && r.mode !== 'baseline' && r.counts.Yes === 0).length,
+        zero_selected_runs: rows.filter(r => r.mode !== 'expansion' && r.mode !== 'baseline' && (r.counts.selected ?? r.counts.Yes) === 0).length };
     }),
     limitations: ['Payload token counts use an explicitly named tokenizer, not verified Codex billing.',
       'Paired savings compare identical admitted candidates; search limits are not credited as Jev savings.',
       'Shadow returns the baseline; its paired savings are hypothetical.',
+      'Expansion groups have a zero incremental baseline: add their negative savings to the original search group, within the same encoding. Repeated expansions count again.',
       'CLI/benchmark responses are not evidence that Codex consumed those tokens.',
       'Whole-task savings require independent A/B tasks including follow-up reads, tool/skill overhead, and model usage.'] };
 }

@@ -46,7 +46,7 @@ test('receipts off preserves auditable counts and omits receipts from success an
   const config = { root: dataDir, dataDir, includeReceipts: false, runMode: 'auto' };
   try {
     const result = await search({ question: 'Find a', query: 'a' }, config, { counter, retrieveImpl,
-      classifyImpl: async () => [{ label: 'Yes' }] });
+      classifyImpl: async () => [{ candidate_id: 'one', label: 'Yes', answer: { probabilities: { Yes: 1, No: 0 } } }] });
     assert.equal(result.isError, false);
     assert.equal(JSON.parse(result.payload).token_savings, undefined);
     assert.equal(result.record.metrics.actual_response_tokens, counter.count(result.payload));

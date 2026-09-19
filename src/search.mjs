@@ -21,6 +21,8 @@ export const searchSchema = z.object({
   max_candidates: z.number().int().min(1).max(1000).default(100)
     .describe('Maximum passages evaluated: default 100, up to 1000. Higher limits increase API cost, latency, and possible response size; narrow the query when practical.'),
   mode: z.enum(['filtered', 'baseline', 'shadow']).default('filtered'),
+  min_yes_probability: z.number().min(0).max(1).optional()
+    .describe('Keep passages with P(Yes) strictly greater than this threshold, even when No wins. Defaults to configured threshold, otherwise 0.50. Lower to admit weaker evidence.'),
 }).strict();
 
 export const sha256 = value => createHash('sha256').update(value).digest('hex');
@@ -90,28 +92,7 @@ export async function retrieve(root, args, { rg = process.env.JEV_CONTEXT_RG || 
   let stdout;
   let admittedFiles;
   const started = performance.now();
-  // Positive --glob options and explicitly named ignored directories can override
-  // rg ignore rules. Build an independent root-wide file set without user globs,
-  // then admit only those paths before any candidate reaches Jev or telemetry.
-  try {
-    const listingArgs = ['--no-config', '--files', '--null'];
-    for (const glob of excluded) listingArgs.push('--glob', `!${glob}`);
-    listingArgs.push('--', '.');
-    let listing;
-    try {
-      ({ stdout: listing } = await exec(rg, listingArgs, { cwd: realRoot, encoding: 'utf8', windowsHide: true,
-        timeout: 15000, maxBuffer: 16 * 1024 * 1024 }));
-    } catch (error) {
-      if (error.code === 1) listing = error.stdout || '';
-      else throw error;
-    }
-    const telemetryRoot = dataDir ? await realpath(dataDir) : null;
-    admittedFiles = new Set(listing.split('\0').filter(Boolean)
-      .map(file => file.replaceAll('\\', '/').replace(/^\.\//, ''))
-      .filter(file => !telemetryRoot || !isWithin(telemetryRoot, path.resolve(realRoot, file))));
-  } catch {
-    throw new Error('Could not verify ignored-file exclusions within the 15s/16MiB limit; narrow the repository or check configuration.');
-  }
+  admittedFiles = await searchableFiles(realRoot, { rg, dataDir });
   try {
     ({ stdout } = await exec(rg, argv, { cwd: realRoot, encoding: 'utf8', windowsHide: true,
       timeout: 15000, maxBuffer: 16 * 1024 * 1024 }));
@@ -132,4 +113,29 @@ export async function retrieve(root, args, { rg = process.env.JEV_CONTEXT_RG || 
     limits: { context_lines: args.context_lines, max_candidates: args.max_candidates,
       max_file_bytes: 1048576, max_passage_chars: 12000, max_passage_lines: 120,
       respects_ignore_files: true, follows_symlinks: false } };
+}
+
+export async function searchableFiles(realRoot, { rg = process.env.JEV_CONTEXT_RG || 'rg', dataDir } = {}) {
+  // Positive --glob options and explicitly named ignored directories can override
+  // rg ignore rules. Build an independent root-wide file set without user globs,
+  // then admit only those paths before any candidate reaches Jev or telemetry.
+  try {
+    const listingArgs = ['--no-config', '--files', '--null'];
+    for (const glob of excluded) listingArgs.push('--glob', `!${glob}`);
+    listingArgs.push('--', '.');
+    let listing;
+    try {
+      ({ stdout: listing } = await exec(rg, listingArgs, { cwd: realRoot, encoding: 'utf8', windowsHide: true,
+        timeout: 15000, maxBuffer: 16 * 1024 * 1024 }));
+    } catch (error) {
+      if (error.code === 1) listing = error.stdout || '';
+      else throw error;
+    }
+    const telemetryRoot = dataDir ? await realpath(dataDir) : null;
+    return new Set(listing.split('\0').filter(Boolean)
+      .map(file => file.replaceAll('\\', '/').replace(/^\.\//, ''))
+      .filter(file => !telemetryRoot || !isWithin(telemetryRoot, path.resolve(realRoot, file))));
+  } catch {
+    throw new Error('Could not verify ignored-file exclusions within the 15s/16MiB limit; narrow the repository or check configuration.');
+  }
 }

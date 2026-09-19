@@ -1,6 +1,6 @@
 # Jev Context
 
-A local Codex plugin for when your LLM needs to search across a codebase to build context. It runs ripgrep, asks Jev which candidate passages are relevant to your task, and returns only `Yes` passages to Codex. This can reduce the unrelated code loaded into the answering model's context. It records paired filtered/unfiltered payloads so retrieval savings can be reproduced exactly under a named tokenizer.
+A local Codex plugin for when your LLM needs to search across a codebase to build context. It runs ripgrep, asks Jev a binary Yes/No relevance question for each candidate passage, and returns passages with `P(Yes) > min_yes_probability` (default `0.50`). Codex can recover lower-scoring passages with `expand_results`, or read surrounding source and containing functions with `expand_context`, without additional Jev calls. It records paired filtered/unfiltered payloads and expansion costs so retrieval savings can be reproduced exactly under a named tokenizer.
 
 Install once for use across local projects. Codex supplies the current workspace on each search, so switching repositories needs no plugin reconfiguration. Global preferences control whether Jev is used automatically or only on request, and whether answers include token-savings receipts. Defaults are **ask only** and **receipts on**.
 
@@ -8,7 +8,7 @@ This repository contains the plugin only. The initial smoke tests used a separat
 
 ## Experimental MVP
 
-Jev Context is an experimental retrieval tool, not a security scanner or a guarantee of complete answers. Relevance judgments can be wrong: `No` and `Unknown` passages are withheld, and recovery of those passages is not implemented. Evaluate answer quality alongside token savings before relying on filtering for important work.
+Jev Context is an experimental retrieval tool, not a security scanner or a guarantee of complete answers. Relevance judgments can be wrong. Passages at or below the threshold are withheld; `expand_results` can recover lower-scoring passages from successful binary filtered searches. Evaluate answer quality alongside token savings before relying on filtering for important work.
 
 Filtered and shadow searches send candidate code and your question to the TypeSafe API and can incur charges. Use them only with code you are authorized to send to that service. Ignore rules and filename exclusions do not detect secrets embedded in ordinary source. Local telemetry retains original passages, including withheld code; keep it private. See [Data handling](#data-handling).
 
@@ -128,9 +128,9 @@ Give Codex the actual task and ask it to use Jev **before loading broad search o
 For better results:
 
 - **Provide a concrete question.** “Find where retry limits are read and enforced” gives the classifier a clearer goal than “find interesting code.”
-- **Search in stages.** Start with likely symbols or terms, then follow dependencies and tests. Ripgrep retrieves literal/regex matches; Jev judges those candidates. It is not a semantic index that discovers code with no matching query terms.
+- **Search broadly, then trace.** For exploratory questions, use a bounded directory and broader terms or regex alternatives with a specific relevance objective. Jev can filter the extra candidates before Codex reads them. Then follow discovered symbols, dependencies, and tests. Ripgrep retrieves literal/regex matches; Jev is not a semantic index that discovers code with no matching query terms.
 - **Narrow after discovery.** Use relevant directories and file globs, and keep candidate caps modest. One admitted passage means one API call; repeated searches incur new usage because there is no classification cache.
-- **Check coverage and context.** Candidate-cap notices mean some passages were not considered. Refine the search, or deliberately increase the cap/context when needed. Withheld passages cannot currently be expanded by ID.
+- **Recover the right kind of missing evidence.** Use `expand_results` to lower the threshold on saved candidates, and `expand_context` to read a missing branch or nearby definition around a returned passage. Both avoid additional Jev calls but add response tokens. Candidate-cap omissions, unmatched symbols, and dependencies in other files require further searches or direct reads.
 - **Judge answer quality as well as savings.** Ask for source references, follow relevant dependencies, and run appropriate tests before accepting changes. Filtering can omit important evidence.
 
 For a known file or exact line, reading it directly is usually simpler. Searches where nearly every result is relevant may save little or add payload overhead, while still adding Jev latency and API usage. Use ask-only while evaluating the tradeoff; opt into [auto mode](#preferences) if you want Codex instructed to use Jev for routine code searches. Reported retrieval savings do not establish whole-task speed or cost savings.
@@ -154,7 +154,7 @@ node --env-file=.env src/cli.mjs benchmark --root "$repoPath" --input examples/b
 node src/cli.mjs report --data .jev-context/live-smoke --out reports/live-smoke --labels examples/labels.json --verify
 ```
 
-The supplied three cases are capped at 12 candidates each: at most 36 Jev calls before you modify them. Each rerun incurs new API usage; there is no classification cache or automatic retry. Use a fresh `--data` directory per independent suite, or reports will include every run in that directory. Three examples are a smoke test, not a representative efficacy study.
+The supplied three cases are capped at 12 candidates each: at most 36 Jev calls before you modify them. Each rerun incurs new API usage; there is no classification cache or automatic retry. Use a fresh `--data` directory per independent suite, or reports will include every retained run in that directory. The 200 MB storage limit also applies to benchmark directories; archive completed runs outside the active telemetry directory if you need lasting reproducibility. Three examples are a smoke test, not a representative efficacy study.
 
 `search` prints response text to stdout and a metrics receipt to stderr. The MCP server reserves stdout for transport. `benchmark` prints metrics, not raw source passages. `report` writes `summary.json` and `runs.csv` without an API key. `--verify` re-tokenizes saved payloads, checks payload/candidate hashes and selection against stored judgments, and exits nonzero on an audit mismatch. This is a reproducibility check, not a signed attestation.
 
@@ -186,7 +186,7 @@ Edit `.env` in the original plugin checkout for API and search configuration:
 - `TYPESAFE_MODEL`: defaults to `jev-latest`. Use a specific available model version for repeatable comparisons.
 - `JEV_CONTEXT_ENCODING`: defaults to `o200k_base`; also supports `cl100k_base`. This changes measurement, not the Codex model.
 - `JEV_CONTEXT_CONCURRENCY`: concurrent classification calls per search, integer 1–8; default 4. This is not a session-wide spending limit.
-- `JEV_CONTEXT_MIN_YES_PROBABILITY`: number from 0–1; default 0. A Yes below this threshold becomes Unknown and is withheld. Higher values can discard useful evidence; no universal threshold has been established.
+- `JEV_CONTEXT_MIN_YES_PROBABILITY`: number from 0–1; default `0.50`. Keep a passage when `P(Yes)` is strictly greater, regardless of the winning verdict. A search's `min_yes_probability` overrides this default. Higher values can discard useful evidence; no universal threshold has been established. **Migration:** older `.env` files may explicitly set `0`; remove that setting or change it to `0.5` to adopt the new default. Explicit zero remains supported and admits any positive Yes probability.
 - `JEV_CONTEXT_RG`: ripgrep executable path; defaults to `rg` on PATH. Prefer launcher `--rg` as in the quickstart.
 - `JEV_CONTEXT_DATA_DIR`: telemetry directory; defaults to `.jev-context` under your user home directory. Use an absolute path for predictable placement.
 - `JEV_CONTEXT_SETTINGS_FILE`: optional absolute path to an alternative preferences JSON file. Default: `jev-context.settings.json` beside the plugin source. Advanced use only: `scripts/settings.mjs` still writes beside the checkout, so a custom file and the generated skill must be kept consistent.
@@ -221,16 +221,63 @@ Optional fields:
 - `context_lines`: 0–30, default 8.
 - `max_candidates`: 1–1,000, default 100; set per search to change the passage limit.
 - `mode`: `filtered` (default), `baseline`, or `shadow`.
+- `min_yes_probability`: 0–1; overrides the environment default for this search. Comparison is strict: `0.50` excludes an exact 50/50 result; `0.33` admits a 0.40 Yes probability even when No wins. Zero still excludes an exact zero; one admits nothing.
 
-`filtered` returns only Yes. `baseline` returns all admitted candidates and makes **no Jev calls**. `shadow` classifies but returns the baseline; its paired reduction is hypothetical and its actual payload saving is zero. The baseline shares candidate chunking, query, exclusions, caps, and formatting with filtered mode; it is **not** arbitrary native grep output.
+`filtered` returns passages above the threshold. `baseline` returns all admitted candidates and makes **no Jev calls**. `shadow` classifies but returns the baseline; its paired reduction is hypothetical and its actual payload saving is zero. The baseline shares candidate chunking, query, exclusions, caps, and formatting with filtered mode; it is **not** arbitrary native grep output. Scored responses include each returned passage's `yes_probability`, the effective threshold, and counts of withheld passages in score bands `[0, 0.33]`, `(0.33, 0.50]`, `(0.50, 0.75]`, and `(0.75, 1]`. Band counts contain only passages still withheld at the effective threshold.
 
 Passages retain source paths, line numbers, source text, and stable content IDs. Nearby matches merge; chunks are bounded to 120 lines/12,000 characters. Search respects ignore files, does not follow symlinks, excludes files over 1 MiB, and bounds each ripgrep phase to 15 seconds/16 MiB. An independent file listing from the repository root enforces ignore rules even when include globs or an explicit subdirectory would override them. The configured telemetry directory is also excluded before classification. This extra listing adds latency, and repositories exceeding its limits fail closed. Candidate-cap and oversized-line omissions are explicit. A ripgrep error or overflow returns an error rather than a silently partial success. These search limits are not Jev savings.
 
-Jev is asked one independent Choice question per passage, with Yes/No/Unknown rubrics. Optional `JEV_CONTEXT_MIN_YES_PROBABILITY` (0–1, default 0) demotes a low-probability Yes to Unknown while preserving the original judgment. Do not treat the default as an evaluated universal threshold. `TYPESAFE_MODEL` defaults to `jev-latest`; pin a version for longitudinal experiments. `JEV_CONTEXT_CONCURRENCY` is 1–8, default 4. Each API call times out after 15 seconds.
+Jev is asked one independent Choice question per passage, with Yes/No rubrics (`relevance-binary-v2`). Raw judgments are preserved independently of the selection threshold. The threshold is not sent to Jev. Binary probabilities are not interchangeable with the older three-way Yes/No/Unknown scores, and the thresholds are not evaluated guarantees of accuracy. `TYPESAFE_MODEL` defaults to `jev-latest`; pin a version for longitudinal experiments. `JEV_CONTEXT_CONCURRENCY` is 1–8, default 4. Each API call times out after 15 seconds.
 
 The passage limit is a ceiling, not a target: only admitted matches are classified. A limit of 1,000 can make up to 1,000 paid Jev calls in filtered/shadow mode. Concurrency stays at four by default. Slow large searches can exceed the generated launcher's 600-second tool timeout, and many retained passages can produce a response too large for the host's context. The existing ripgrep size/time bounds still apply. Prefer narrower queries or smaller limits when practical; increasing the passage cap does not guarantee complete repository coverage.
 
-Any failed classification makes the entire search an error with **no source text returned**. Successful API usage within that failed run is retained; unavailable usage is flagged, never assumed free. Error responses are counted, and failed runs are excluded from successful paired-savings totals. An all-No/Unknown result explicitly says that no passages passed filtering; it does not assert an absence of evidence. Recovery of withheld items remains post-MVP.
+Any failed classification makes the entire search an error with **no source text returned**. Successful API usage within that failed run is retained; unavailable usage is flagged, never assumed free. Error responses are counted, and failed runs are excluded from successful paired-savings totals. An empty filtered result explicitly says that no passages passed filtering; it does not assert an absence of evidence.
+
+### Expand a saved retrieval
+
+Call `expand_results` when the existing candidates may contain useful lower-scoring evidence. Supply:
+
+```json
+{
+  "retrieval_id": "<original search retrieval_id>",
+  "repository_root": "<absolute current repository path>",
+  "previous_threshold": 0.50,
+  "min_yes_probability": 0.33
+}
+```
+
+This returns only passages with `0.33 < P(Yes) <= 0.50`, including the exact 0.50 boundary withheld by the original search. For a subsequent expansion to 0.20, use the same original ID, `previous_threshold: 0.33`, and `min_yes_probability: 0.20`. The previous threshold must be the lowest one already consumed and cannot exceed the original search threshold. The new threshold must be strictly lower. The plugin is stateless about conversation consumption: repeated or overlapping intervals return duplicate content and incur additional payload tokens.
+
+Each expansion gets its own `retrieval_id` for accounting, with `source_retrieval_id` pointing to the original search. Expansion reads local saved candidates and scores; it does not rerun ripgrep, fetch current source, or call Jev. The response includes the snapshot timestamp. Verify current files before editing. Keep the original record available for later expansions and audits. Repository identity is checked, but the server still runs with the host's filesystem permissions.
+
+Legacy ternary, baseline, shadow, failed, and expansion records cannot be expanded; run a fresh binary filtered search. An absent or corrupt record is an error, not evidence of no matches. If the search omitted candidates due to its cap or used the wrong vocabulary, change the search instead of merely lowering its threshold. For missing code around an existing passage, use `expand_context`. The same score-expansion operation is available through `node src/cli.mjs expand --input expansion.json` with a JSON object like the one above. Use the same telemetry directory as the original search (`--data` if customized); no API key is required.
+
+### Expand source context
+
+`expand_context` fills gaps outside a returned passage, without a Jev call or relevance filter. Supply the original binary filtered search's `retrieval_id`, a returned `candidate_id`, and the absolute `repository_root`. An optional `anchor_line` selects a line within that saved passage (default: its first matching line).
+
+For example, save the following as `context.json`, replacing the placeholders with values from a successful search:
+
+```json
+{
+  "retrieval_id": "<original search retrieval_id>",
+  "candidate_id": "<returned passage id>",
+  "repository_root": "<absolute current repository path>",
+  "mode": "function",
+  "max_lines": 120,
+  "max_chars": 12000
+}
+```
+
+A passage returned by `expand_results` can also be used: take its `id` as `candidate_id` and the response's `source_retrieval_id` as the original search ID. Do not use an expansion response's own `retrieval_id` or an expanded context result's ID as the seed.
+
+- `mode: function` (default) locates the containing GDScript/Python function using conservative indentation and string/comment handling. Other languages and anchors outside a recognized function use an explicitly labeled surrounding-line fallback. This is a lexical helper, not a full parser.
+- `mode: surrounding` uses `before_lines` and `after_lines` around the anchor, each defaulting to 40 (0–150 allowed).
+- `max_lines` defaults to 120 (1–300 allowed); `max_chars` defaults to 12,000 (100–24,000 allowed). Oversized ranges are trimmed around the anchor. Inspect `selection`, `requested_range`, and `truncated`; an oversized anchor line errors rather than returning partial source.
+
+The tool reads the **current local file**, checks that the original passage still matches at its original line numbers, and rechecks ignore rules, exclusions, symlinks, repository boundaries, and the 1 MiB file limit. If the original passage moved or changed, run a fresh search. Nearby code may have changed even if the anchor passage is unchanged; the response includes the read time and file/content hashes and does not attach a relevance probability.
+
+Context expansion does not automatically follow dependencies or rescore code. Use it for a missing branch or nearby definition; use a focused search for a dependency in another file. Repeated/overlapping context counts in full. Receipts use the same zero incremental baseline as score expansion, and `report --verify` checks persisted context without requiring current source to remain unchanged. Context records use `operation: expand_context` and save `record.json` plus `actual.txt`. CLI equivalent: `node src/cli.mjs expand-context --input context.json`. Use the original search's telemetry directory (`--data` if customized); no API key is required.
 
 ## What the token metrics mean
 
@@ -242,6 +289,8 @@ For each call, let `B` be the token count of `baseline.txt`, `F` of `filtered.tx
 - Suite reduction is `100 × (sum(B) - sum(F)) / sum(B)`, **not** an average of percentages.
 
 Counts include the entire saved response text: JSON structure, paths, IDs, counts, notices, and selected code. They use pinned `tiktoken` 1.0.22 with explicit `o200k_base` by default (`JEV_CONTEXT_ENCODING=cl100k_base` is also supported). They are exact for those saved strings under that encoding. **The tokenizer used internally by the current Codex model is not verified. These are not exact host-context or billed token counts.** Tool transport framing, injected tool definitions/skill instructions, the model's tool-call generation, and subsequent turns are outside this payload metric. Tool arguments are counted separately as `tool_arguments_tokens`.
+
+Expansion receipts have a **zero incremental baseline** and negative savings equal to the complete expansion response token count. Subtract that added context from the original search's savings; do not count the original unfiltered baseline again. Every actual expansion response counts, even a repeated or empty interval. Reports separate `search`, `expand`, and `expand_context` groups; sum their signed savings only within the same encoding. Expansion groups have no percentage reduction on their own. `report --verify` checks expansion payloads and selections against their saved parent search; an unavailable parent prevents verification. Failed expansions remain errors with unavailable savings and recorded response tokens.
 
 With receipts enabled, completed search responses include a top-level `token_savings` receipt. The tool description and skill instruct Codex to append its `footer` to the final answer, for example: “Jev Context: saved 611 retrieval tokens (37.5%; o200k_base).” This example is illustrative, not a measurement for your current task. Multiple calls are combined by unique retrieval ID and encoding with a weighted percentage. Negative savings are reported as added tokens, and baseline/shadow responses report zero actual savings. Recorded search errors report savings as unavailable; protocol validation failures may have no receipt. Final-answer presentation is guided by the skill; the MCP server cannot force the host model to render a footer.
 
@@ -267,11 +316,21 @@ The usage file is an array of `{name, baseline, filtered}`. Each arm contains `t
 
 `--labels` accepts a mapping from benchmark case name to manually reviewed `{file, line, relevant: true}` anchors. The report separates retrieval recall (did the search find it?), conditional filter recall (did Jev keep what search found?), and end-to-end anchor recall. `examples/labels.json` contains five positive anchors for the current Brotato source. Update line anchors when the source changes. These sparse labels do not prove overall recall, precision, or answer correctness; add representative labels and complete-task checks before making broad claims.
 
+The standard label report evaluates individual searches and excludes expansion records. To measure recovery across searches and expansions, evaluate the union of returned source ranges against the task's anchors and include every expansion response in token costs. A targeted replay of known gaps tests recovery capability; it does not establish that Codex will autonomously identify those gaps or choose the same expansions.
+
 ## Data handling
 
-Filtered/shadow searches send the question, objective, search query, and code passages to `https://api.typesafe.ai/v1/systemone`. Baseline is local only. The tool does not upload an entire repository. `.env*`, common key files, ignored files, dependency directories, and `.jev-context` are excluded, but this is not a secret scanner: secrets embedded in ordinary source can still be transmitted.
+Filtered/shadow searches send the question, objective, search query, and code passages to `https://api.typesafe.ai/v1/systemone`. Baseline and both expansion tools make no TypeSafe API calls. Score expansion reads saved passages; context expansion reads current local source. Both return code to Codex and persist their responses locally. The tool does not upload an entire repository. `.env*`, common key files, ignored files, dependency directories, and `.jev-context` are excluded, but this is not a secret scanner: secrets embedded in ordinary source can still be transmitted.
 
-Telemetry is local under `~/.jev-context/<run-id>/` by default, outside project checkouts. `JEV_CONTEXT_DATA_DIR` or launcher `--data` overrides this. Existing logs are not moved. Successful runs record their canonical repository root; summaries group by repository and CSV exports include the root. Successful run directories contain `record.json`, `baseline.txt`, `filtered.txt`, and `actual.txt`. Failed runs may contain only the error record and actual response. **These files contain original code and user questions, including withheld passages.** Keep this directory private and out of version control; add any custom data directory to ignore rules. Logs persist until deleted. Raw snapshots are retained so post-MVP expansion and reproducible audits are possible. API key values are never logged.
+Telemetry is local under `~/.jev-context/<run-id>/` by default, outside project checkouts. `JEV_CONTEXT_DATA_DIR` or launcher `--data` overrides this. Existing logs are not moved. Successful runs record their canonical repository root; summaries group by repository and CSV exports include the root. Successful search directories contain `record.json`, `baseline.txt`, `filtered.txt`, and `actual.txt`. Expansions contain `record.json` and `actual.txt` and refer to the original search record. Failed runs may contain only the error record and actual response. **These files contain original code and user questions, including withheld passages.** Keep this directory private and out of version control; add any custom data directory to ignore rules. Raw snapshots support expansion and reproducible audits; no separate cache is required. API key values are never logged.
+
+### Storage limit and automatic cleanup
+
+Each telemetry directory has a fixed **200 MB (200,000,000 bytes)** limit for managed run files. Before and after searches and expansions, the plugin checks storage and, at or above the limit, removes the oldest search groups until usage falls below it. A group is the original search plus all its saved score/context expansions. Age is the original search's creation time; expanding an old search does not make it newer. There is no age expiration or retention setting in this MVP.
+
+Filesystem leases protect operations in progress, including the parent of an active expansion, across plugin processes. In-flight writes can temporarily exceed the limit; cleanup runs again on completion. If a single completed group exceeds the cap, it can be removed immediately. The returned response remains available to the caller, but its retrieval ID will no longer support expansion or audit. Run a fresh search when a saved retrieval has been pruned. Reports cover only retained records.
+
+Cleanup deletes only recognized flat run directories, never follows symlinks, and leaves unrelated files and unrecognized/corrupt records alone. Those files, exported reports, and filesystem allocation overhead are outside the managed-byte cap. Each custom `--data` directory has its own limit. Pruning occurs on tool use, not on a background timer. A short `.storage-lock` coordinates filesystem changes; if a process crashes while holding it, subsequent operations fail with recovery instructions. Remove that lock directory only after stopping every Jev process using the telemetry directory. Abandoned operation leases are cleared once their owner process is no longer running.
 
 The server runs with the host's filesystem permissions. The API configuration is environment-controlled. The repository root is supplied per call; filesystem access follows host permissions, not a fixed repository allowlist. This is a retrieval tool, not a security boundary against a malicious repository or other tools reading files directly.
 
